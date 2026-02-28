@@ -1,0 +1,11 @@
+.env
+*.db
+__pycache__/
+.venv/
+memory/
+*.pyc
+.DS_Store
+dist/
+*.egg-info/
+.worktrees/
+docs/superpowers/
