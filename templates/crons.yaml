@@ -1,0 +1,18 @@
+# Scheduled jobs. Edit to customize.
+# cron: standard 5-field cron expression (UTC)
+# deliver_to: Telegram chat_id to send results to
+
+jobs: []
+
+# Examples:
+#
+# jobs:
+#   - id: morning-briefing
+#     cron: "0 6 * * *"
+#     prompt: "Give me a brief morning summary: weather, any pending tasks, top news."
+#     deliver_to: "YOUR_TELEGRAM_CHAT_ID"
+#
+#   - id: evening-check
+#     cron: "0 20 * * *"
+#     prompt: "Evening check-in. What should I wrap up today?"
+#     deliver_to: "YOUR_TELEGRAM_CHAT_ID"
