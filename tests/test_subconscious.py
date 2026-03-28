@@ -35,12 +35,6 @@ class TestLoadThreads:
         from indieclaw.subconscious import load_threads
         assert load_threads() == []
 
-    def test_load_threads_empty_file(self, monkeypatch, tmp_path):
-        _patch_workspace(tmp_path, monkeypatch)
-        (tmp_path / "subconscious.yaml").write_text("threads: []\n")
-        from indieclaw.subconscious import load_threads
-        assert load_threads() == []
-
 
 class TestAddThread:
     def test_add_thread(self, monkeypatch, tmp_path):

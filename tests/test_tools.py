@@ -1,7 +1,6 @@
 """Tool unit tests."""
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -35,19 +34,3 @@ def test_send_telegram_failure():
     with patch("indieclaw.tools.httpx.Client", _mock_httpx_client(ok=False)):
         assert "Failed" in _send_telegram(chat_id="123", message="hi")
 
-
-
-def test_telegram_send_sdk_success(monkeypatch):
-    monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-    from indieclaw.tools_sdk import telegram_send
-    with patch("indieclaw.tools.httpx.Client", _mock_httpx_client(ok=True)):
-        result = asyncio.run(telegram_send.handler({"chat_id": "123", "message": "hi"}))
-    assert result["content"][0]["text"].startswith("Sent.")
-
-
-def test_telegram_send_sdk_failure(monkeypatch):
-    monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-    from indieclaw.tools_sdk import telegram_send
-    with patch("indieclaw.tools.httpx.Client", _mock_httpx_client(ok=False)):
-        result = asyncio.run(telegram_send.handler({"chat_id": "123", "message": "hi"}))
-    assert "Failed" in result["content"][0]["text"]

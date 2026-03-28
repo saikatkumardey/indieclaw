@@ -139,6 +139,38 @@ class TestDeliverToExplicitEmpty:
         assert added.kwargs["deliver_to"] == "999"
 
 
+class TestAuthFailureTracking:
+    """Auth failures are tracked and alert after consecutive threshold."""
+
+    def setup_method(self):
+        """Reset global auth tracking state before each test."""
+        _sched._auth_fail_count = 0
+        _sched._auth_alert_sent = False
+
+    @patch.object(_sched, "_send_telegram")
+    def test_auth_error_increments_counter(self, mock_send):
+        """Auth error (401) sends alert after 3 consecutive failures."""
+        exc = RuntimeError("API returned 401 Unauthorized")
+        for i in range(3):
+            _sched._handle_auth_failure("test-job", exc, "123")
+        assert _sched._auth_fail_count == 3
+        # First 2 calls are regular failure notifications, 3rd triggers alert
+        calls = mock_send.call_args_list
+        alert_call = calls[-1]
+        assert "AUTH DOWN" in alert_call.kwargs["message"]
+
+    @patch.object(_sched, "_send_telegram")
+    def test_success_resets_auth_counter(self, mock_send):
+        """Success after failures resets the counter."""
+        exc = RuntimeError("API returned 401 Unauthorized")
+        _sched._handle_auth_failure("test-job", exc, "123")
+        _sched._handle_auth_failure("test-job", exc, "123")
+        assert _sched._auth_fail_count == 2
+        _sched._reset_auth_tracking()
+        assert _sched._auth_fail_count == 0
+        assert _sched._auth_alert_sent is False
+
+
 class TestVersionCheckSkipped:
     """Cron jobs skip the SDK version check subprocess."""
 

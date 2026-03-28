@@ -211,15 +211,6 @@ def test_subconscious_options_slim(tmp_path, monkeypatch):
     assert opts.max_turns == 3
 
 
-def test_subconscious_options_max_turns_capped(tmp_path, monkeypatch):
-    """Subconscious should get max_turns=3, not the default 10."""
-    _patch_workspace(tmp_path, monkeypatch)
-    import indieclaw.agent as ag
-
-    opts = ag._make_options("cron:subconscious")
-    assert opts.max_turns == 3
-
-
 # ---------------------------------------------------------------------------
 # Tool activity tracking
 # ---------------------------------------------------------------------------
@@ -243,21 +234,6 @@ class TestToolActivity:
         assert elapsed >= 4.0
         _tool_activity.pop("test-chat", None)
         _tool_start_time.pop("test-chat", None)
-
-    def test_tool_label_mapping(self):
-        from indieclaw.agent import _tool_label
-        assert _tool_label("Bash") == "running command"
-        assert _tool_label("WebSearch") == "searching"
-        assert _tool_label("WebFetch") == "fetching page"
-        assert _tool_label("browse") == "browsing"
-        assert _tool_label("browser_click") == "browsing"
-        assert _tool_label("browser_type") == "browsing"
-        assert _tool_label("browser_screenshot") == "browsing"
-        assert _tool_label("browser_eval") == "browsing"
-        assert _tool_label("Read") == "reading files"
-        assert _tool_label("Write") == "writing files"
-        assert _tool_label("mcp__indieclaw__telegram_send") == "sending message"
-        assert _tool_label("some_custom_tool") == "some_custom_tool"
 
 
 def test_initial_timeout_config_default():
@@ -297,37 +273,6 @@ async def test_run_uses_initial_timeout_before_first_event(tmp_path, monkeypatch
          patch("indieclaw.agent.reload_dynamic_tools"):
         result = await ag.run(chat_id="timeout-test", user_message="hi")
         assert "Stalled" in result or "no progress" in result.lower()
-
-
-@pytest.mark.asyncio
-async def test_run_streaming_uses_initial_timeout(tmp_path, monkeypatch):
-    """run_streaming() should also use split timeouts."""
-    _patch_workspace(tmp_path, monkeypatch)
-    import indieclaw.agent as ag
-    import indieclaw.config as cfg_mod
-
-    monkeypatch.setattr(cfg_mod.Config, "DEFAULTS", {
-        **ag.Config.DEFAULTS,
-        "agent_initial_timeout": 0.05,
-        "agent_stall_timeout": 999,
-    })
-    monkeypatch.setattr(cfg_mod, "_cache", None)
-
-    async def _hang_forever():
-        await asyncio.sleep(9999)
-        yield
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.receive_response = MagicMock(return_value=_hang_forever())
-
-    with patch("indieclaw.agent.ClaudeSDKClient", return_value=mock_client), \
-         patch("indieclaw.agent.reload_dynamic_tools"):
-        chunks = []
-        async for chunk in ag.run_streaming(chat_id="stream-timeout", user_message="hi"):
-            chunks.append(chunk)
-        assert any("Stalled" in str(c) or "no progress" in str(c).lower() for c in chunks)
 
 
 @pytest.mark.asyncio

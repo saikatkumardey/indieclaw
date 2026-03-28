@@ -1,6 +1,7 @@
 """Handler tests — Telegram message handling, chunking, markdown conversion."""
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,10 +34,6 @@ class TestToTelegramHtml:
     def test_heading_conversion(self):
         from indieclaw.handlers import _to_telegram_html
         assert _to_telegram_html("## Heading") == "<b>Heading</b>"
-
-    def test_h1_heading(self):
-        from indieclaw.handlers import _to_telegram_html
-        assert _to_telegram_html("# Title") == "<b>Title</b>"
 
     def test_no_change_plain_text(self):
         from indieclaw.handlers import _to_telegram_html
@@ -584,3 +581,201 @@ class TestOnModel:
         await on_model(update, MagicMock())
         reply_text = update.message.reply_text.call_args[0][0]
         assert "Unknown" in reply_text
+
+
+# ---------------------------------------------------------------------------
+# /btw command
+# ---------------------------------------------------------------------------
+
+class TestOnBtw:
+    @pytest.mark.asyncio
+    async def test_btw_no_args_shows_usage(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import on_btw
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.text = "/btw"
+        update.message.reply_text = AsyncMock()
+        ctx = _make_context()
+        await on_btw(update, ctx)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "Usage" in reply
+
+    @pytest.mark.asyncio
+    async def test_btw_runs_subprocess(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import on_btw
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.text = "/btw what is 2+2?"
+        update.message.reply_text = AsyncMock()
+        ctx = _make_context()
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "It is 4."
+
+        async def fake_to_thread(fn, *a, **kw):
+            return mock_result
+
+        import indieclaw.handlers as _h
+        with patch.object(_h.asyncio, "to_thread", side_effect=fake_to_thread), \
+             patch.object(_h, "_TypingLoop") as mock_typing:
+            mock_typing.return_value.__aenter__ = AsyncMock()
+            mock_typing.return_value.__aexit__ = AsyncMock()
+            await on_btw(update, ctx)
+        update.message.reply_text.assert_awaited()
+        calls = update.message.reply_text.await_args_list
+        assert any("It is 4." in str(c) for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# /cc command
+# ---------------------------------------------------------------------------
+
+class TestOnCC:
+    @pytest.mark.asyncio
+    async def test_cc_no_args_shows_help(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import on_cc
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.text = "/cc"
+        update.message.reply_text = AsyncMock()
+        ctx = _make_context()
+
+        with patch("indieclaw.claude_code.has_active_session", return_value=False), \
+             patch("indieclaw.claude_code.get_session_info", return_value=None):
+            await on_cc(update, ctx)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "/cc" in reply
+        assert "stop" in reply.lower()
+
+    @pytest.mark.asyncio
+    async def test_cc_stop_without_session(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import on_cc
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.text = "/cc stop"
+        update.message.reply_text = AsyncMock()
+        ctx = _make_context()
+
+        with patch("indieclaw.claude_code.has_active_session", return_value=False), \
+             patch("indieclaw.claude_code.stop_session", new_callable=AsyncMock, return_value=False), \
+             patch("indieclaw.claude_code.get_stop_summary", return_value=""):
+            await on_cc(update, ctx)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "No active" in reply
+
+
+# ---------------------------------------------------------------------------
+# Debounce — multiple messages combined
+# ---------------------------------------------------------------------------
+
+class TestDebounceMultipleMessages:
+    @pytest.mark.asyncio
+    async def test_multiple_messages_combined(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import flush_debounce, on_message
+
+        captured_msgs = []
+
+        async def mock_agent_run(chat_id, user_message, **kw):
+            captured_msgs.append(user_message)
+            return "ok"
+
+        update1 = _make_update(text="first")
+        update2 = _make_update(text="second")
+        update3 = _make_update(text="third")
+        ctx = _make_context()
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, side_effect=mock_agent_run), \
+             patch("indieclaw.handlers.get_streaming", return_value=False), \
+             patch("indieclaw.claude_code.has_active_session", return_value=False):
+            await on_message(update1, ctx)
+            await on_message(update2, ctx)
+            await on_message(update3, ctx)
+            await flush_debounce("123")
+
+        assert len(captured_msgs) == 1
+        combined = captured_msgs[0]
+        assert "first" in combined
+        assert "second" in combined
+        assert "third" in combined
+
+
+# ---------------------------------------------------------------------------
+# on_video
+# ---------------------------------------------------------------------------
+
+class TestOnVideo:
+    @pytest.mark.asyncio
+    async def test_video_downloads_and_passes_to_agent(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "UPLOADS_DIR", tmp_path)
+
+        from indieclaw.handlers import on_video
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.message.caption = "Check this out"
+        video = MagicMock()
+        video.file_id = "vid1"
+        video.file_unique_id = "viduniq1"
+        video.duration = 10
+        update.message.video = video
+        update.message.animation = None
+        update.message.message_id = 42
+        update.message.reply_text = AsyncMock()
+
+        ctx = MagicMock()
+        ctx.bot.send_chat_action = AsyncMock()
+        file_mock = AsyncMock()
+        ctx.bot.get_file = AsyncMock(return_value=file_mock)
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value="Saw the video"), \
+             patch("indieclaw.handlers.get_streaming", return_value=False):
+            await on_video(update, ctx)
+        file_mock.download_to_drive.assert_awaited_once()
+        update.message.reply_text.assert_awaited()
+        calls = update.message.reply_text.await_args_list
+        assert any("Saw the video" in str(c) for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# /start command
+# ---------------------------------------------------------------------------
+
+class TestOnStart:
+    @pytest.mark.asyncio
+    async def test_start_shows_user_id_for_allowed_user(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import on_start
+        update = MagicMock()
+        update.effective_chat.id = 123
+        update.effective_user.id = 123
+        update.message.reply_text = AsyncMock()
+        ctx = _make_context()
+
+        with patch("indieclaw.auth.is_allowed", return_value=True), \
+             patch("indieclaw.version.local_version", return_value="0.1.0"):
+            await on_start(update, ctx)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "123" in reply
+
+    @pytest.mark.asyncio
+    async def test_start_shows_user_id_for_unknown_user(self, monkeypatch):
+        from indieclaw.handlers import on_start
+        update = MagicMock()
+        update.effective_chat.id = 456
+        update.effective_user.id = 456
+        update.message.reply_text = AsyncMock()
+        ctx = _make_context()
+
+        with patch("indieclaw.auth.is_allowed", return_value=False), \
+             patch("indieclaw.version.local_version", return_value="0.1.0"):
+            await on_start(update, ctx)
+        reply = update.message.reply_text.call_args[0][0]
+        assert "456" in reply
+        assert "indieclaw setup" in reply

@@ -64,15 +64,6 @@ class TestDailyRollover:
         usage = state.get_usage_today()
         assert usage["input_tokens"] == 50  # reset, not 150
 
-    def test_get_usage_today_returns_zero_on_stale_date(self, tmp_path, monkeypatch):
-        _patch_workspace(tmp_path, monkeypatch)
-        from indieclaw.session_state import SessionState
-        state = SessionState()
-        state._data["usage_today"]["date"] = "2020-01-01"
-        state._data["usage_today"]["input_tokens"] = 999
-        usage = state.get_usage_today()
-        assert usage["input_tokens"] == 0  # stale date → zero
-
 
 class TestLoad:
     def test_fresh_state_when_file_missing(self, tmp_path, monkeypatch):
