@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.2] - 2026-03-28
+
+- perf: dead code removal, regex precompilation, lazy file reads
+
+
 ## [0.1.1] - 2026-03-28
 
 - feat: /start shows user ID to all users for easy setup
