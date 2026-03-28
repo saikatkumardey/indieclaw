@@ -2,6 +2,13 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.1] - 2026-03-28
+
+- feat: /start shows user ID to all users for easy setup
+- docs: update README with pip install, PyPI/CI/Python badges
+- Initial release of IndieClaw v0.1.0
+
+
 ## [0.1.0] - 2026-03-28
 
 - Initial release as IndieClaw
