@@ -1,20 +1,28 @@
 # IndieClaw
 
+[![PyPI](https://img.shields.io/pypi/v/indieclaw?color=blue)](https://pypi.org/project/indieclaw/)
+[![Python](https://img.shields.io/pypi/pyversions/indieclaw)](https://pypi.org/project/indieclaw/)
+[![CI](https://github.com/saikatkumardey/indieclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/saikatkumardey/indieclaw/actions/workflows/ci.yml)
 [![python-doctor](https://img.shields.io/badge/python--doctor-90%2F100-brightgreen)](https://github.com/saikatkumardey/python-doctor)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Personal AI agent on Telegram. Self-hosted, powered by Claude.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/saikatkumardey/indieclaw/main/install.sh | bash
+pip install indieclaw
 ```
 
-Or manually:
+Or with uv:
 
 ```bash
-pip install uv
-uv tool install git+https://github.com/saikatkumardey/indieclaw
+uv tool install indieclaw
+```
+
+Then set up:
+
+```bash
 indieclaw setup
 ```
 
