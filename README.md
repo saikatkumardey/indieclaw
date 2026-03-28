@@ -26,7 +26,7 @@ Then set up:
 indieclaw setup
 ```
 
-Setup asks for your Telegram bot token, user ID, and Claude auth. Get a bot token from [@BotFather](https://t.me/BotFather) and your user ID from [@userinfobot](https://t.me/userinfobot).
+Setup asks for your Telegram bot token, user ID, and Claude auth. Get a bot token from [@BotFather](https://t.me/BotFather), then send `/start` to your bot — it will show your Telegram user ID.
 
 ## Run
 

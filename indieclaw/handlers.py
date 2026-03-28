@@ -309,16 +309,28 @@ async def _run_agent_and_reply(
         await _drain_followups(bot, chat_id)
 
 
-@require_allowed
 async def on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    uid = user.id if user else "unknown"
+    from .auth import is_allowed
     from .version import local_version
     ver = local_version()
-    text = (
-        f"\U0001f44b <b>IndieClaw</b> v{ver}\n\n"
-        "Send me a message, photo, file, or voice note.\n"
-        "I can run commands, browse the web, and learn new skills.\n\n"
-        "/help \u2014 see all commands"
-    )
+
+    if update.effective_chat and is_allowed(update.effective_chat.id):
+        text = (
+            f"\U0001f44b <b>IndieClaw</b> v{ver}\n\n"
+            "Send me a message, photo, file, or voice note.\n"
+            "I can run commands, browse the web, and learn new skills.\n\n"
+            f"Your Telegram user ID: <code>{uid}</code>\n\n"
+            "/help \u2014 see all commands"
+        )
+    else:
+        text = (
+            f"\U0001f44b <b>IndieClaw</b> v{ver}\n\n"
+            f"Your Telegram user ID: <code>{uid}</code>\n\n"
+            "Copy this ID and paste it during <code>indieclaw setup</code> "
+            "to connect this bot to your account."
+        )
     try:
         await update.message.reply_text(text, parse_mode="HTML")
     except Exception:
