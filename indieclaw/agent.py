@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -43,14 +44,6 @@ AVAILABLE_EFFORTS: list[tuple[str, str]] = [
     ("max",    "Max — maximum thinking budget"),
 ]
 
-# Legacy stubs — imported by handlers_commands.py, cleaned up in Task 4.
-_CONTEXT_WINDOWS: dict[str, int] = {
-    "claude-opus-4-6": 1_000_000,
-    "claude-sonnet-4-6": 200_000,
-    "claude-haiku-4-5-20251001": 200_000,
-}
-_DEFAULT_CONTEXT_WINDOW = 200_000
-
 # ---------------------------------------------------------------------------
 # Session state (minimal)
 # ---------------------------------------------------------------------------
@@ -63,15 +56,12 @@ _last_usage: dict[str, dict] = {}        # chat_id -> last usage dict
 # Tool activity tracking (read by handlers.py for UX indicators)
 # ---------------------------------------------------------------------------
 
-import time as _time  # noqa: E402
-
 _tool_activity: dict[str, str] = {}       # chat_id -> human-readable tool label
 _tool_start_time: dict[str, float] = {}   # chat_id -> monotonic timestamp
 
 _TOOL_LABELS: dict[str, str] = {
     "Bash": "running command",
     "WebSearch": "searching",
-    "WebFetch": "fetching page",
     "browse": "browsing",
     "browser_click": "browsing",
     "browser_type": "browsing",
@@ -170,9 +160,6 @@ async def reset_session(chat_id: str) -> None:
 
 def get_last_usage(chat_id: str) -> dict | None:
     return _last_usage.get(chat_id)
-
-
-# Legacy stubs — imported by handlers.py / handlers_commands.py, cleaned up in Task 4.
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,15 @@ from .handlers_commands import (  # noqa: F401
 )
 from .tools import MAX_TG_MSG
 
+_RE_CODE_SPLIT = re.compile(r"(```[\s\S]*?```|`[^`]+`)")
+_RE_BOLD_STAR = re.compile(r"\*\*(.+?)\*\*")
+_RE_BOLD_UNDER = re.compile(r"__(.+?)__")
+_RE_ITALIC = re.compile(r"(?<![<b])\*(.+?)\*(?![>])")
+_RE_LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_RE_HEADING = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+_RE_BULLET = re.compile(r"^(\s*)-\s+", re.MULTILINE)
+_RE_STRIP_HTML = re.compile(r"<[^>]+>")
+
 _DEBOUNCE_SECONDS = 1.5
 _debounce_buffers: dict[str, dict] = {}
 _active_runs: dict[str, asyncio.Task] = {}  # chat_id -> running agent task
@@ -53,7 +62,7 @@ async def flush_debounce(chat_id: str) -> None:
 
 def _to_telegram_html(text: str) -> str:
     """Convert CommonMark to Telegram-safe HTML."""
-    parts = re.split(r"(```[\s\S]*?```|`[^`]+`)", text)
+    parts = _RE_CODE_SPLIT.split(text)
     result = []
     for part in parts:
         if part.startswith("```"):
@@ -72,12 +81,12 @@ def _to_telegram_html(text: str) -> str:
             result.append(f"<code>{_html.escape(inner, quote=False)}</code>")
         else:
             part = _html.escape(part)
-            part = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", part)
-            part = re.sub(r"__(.+?)__", r"<b>\1</b>", part)
-            part = re.sub(r"(?<![<b])\*(.+?)\*(?![>])", r"<i>\1</i>", part)
-            part = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', part)
-            part = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", part, flags=re.MULTILINE)
-            part = re.sub(r"^(\s*)-\s+", "\\1\u2022 ", part, flags=re.MULTILINE)
+            part = _RE_BOLD_STAR.sub(r"<b>\1</b>", part)
+            part = _RE_BOLD_UNDER.sub(r"<b>\1</b>", part)
+            part = _RE_ITALIC.sub(r"<i>\1</i>", part)
+            part = _RE_LINK.sub(r'<a href="\2">\1</a>', part)
+            part = _RE_HEADING.sub(r"<b>\1</b>", part)
+            part = _RE_BULLET.sub("\\1\u2022 ", part)
             result.append(part)
     return "".join(result)
 
@@ -157,7 +166,7 @@ class _TypingLoop:
 
 def _strip_html(text: str) -> str:
     """Remove HTML tags so the text is safe as plain text."""
-    return re.sub(r"<[^>]+>", "", text)
+    return _RE_STRIP_HTML.sub("", text)
 
 
 async def _reply_html(message, text: str) -> None:
@@ -194,11 +203,6 @@ _DRAFT_INTERVAL = 0.5  # minimum seconds between draft updates
 _DRAFT_ID = 1  # constant draft_id; same ID = animated updates
 
 
-def _append_context_warn(reply: str, chat_id: str) -> str:
-    # Context tracking removed — auto-rotation handles this now.
-    return reply
-
-
 async def _draft_sender(bot, chat_id: str, accumulated: list[str], done_event: asyncio.Event) -> None:
     while not done_event.is_set():
         draft_text = ""
@@ -225,7 +229,6 @@ async def _draft_sender(bot, chat_id: str, accumulated: list[str], done_event: a
 
 async def _run_agent_and_reply_streaming(
     bot, message, chat_id: str, agent_msg: str,
-    *, context_warn: bool = False,
 ) -> None:
     accumulated: list[str] = []
     done_event = asyncio.Event()
@@ -238,8 +241,7 @@ async def _run_agent_and_reply_streaming(
                 done_event.set()
                 if not data or _is_tool_noise(data):
                     return
-                reply = _append_context_warn(data, chat_id) if context_warn else data
-                await _send_reply(bot, message, chat_id, reply)
+                await _send_reply(bot, message, chat_id, data)
     except asyncio.CancelledError:
         if message:
             await message.reply_text("Stopped.")
@@ -272,12 +274,11 @@ async def _drain_followups(bot, chat_id: str) -> None:
     if skipped:
         logger.info("Skipped %d queued messages for %s, processing last", skipped, chat_id)
     agent_msg = f"[chat_id={chat_id}]\n{followup}"
-    await _run_agent_and_reply(bot, None, chat_id, agent_msg, context_warn=True)
+    await _run_agent_and_reply(bot, None, chat_id, agent_msg)
 
 
 async def _run_agent_and_reply(
     bot, message, chat_id: str, agent_msg: str,
-    *, context_warn: bool = False,
 ) -> None:
     """Run agent and send reply. Shared by on_message, on_reaction, _handle_upload."""
     _active_runs[chat_id] = asyncio.current_task()
@@ -285,7 +286,7 @@ async def _run_agent_and_reply(
         # Use streaming for interactive sessions when enabled
         if message and not chat_id.startswith("cron:") and get_streaming():
             await _run_agent_and_reply_streaming(
-                bot, message, chat_id, agent_msg, context_warn=context_warn,
+                bot, message, chat_id, agent_msg,
             )
             return
 
@@ -294,8 +295,6 @@ async def _run_agent_and_reply(
                 reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
             if not reply or _is_tool_noise(reply):
                 return
-            if context_warn:
-                reply = _append_context_warn(reply, chat_id)
             await _send_reply(bot, message, chat_id, reply)
         except asyncio.CancelledError:
             if message:
@@ -341,7 +340,7 @@ async def on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 async def on_reset(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = str(update.effective_chat.id)
     session_log(chat_id, "system", "SESSION_RESET")
-    await reset_session(chat_id, clear_resume=True)
+    await reset_session(chat_id)
     await update.message.reply_text("\u2705 Session reset. Starting fresh.")
 
 
@@ -519,7 +518,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         last_msg = pending["last_msg"]
         bot = pending["bot"]
         agent_msg = f"[chat_id={chat_id} message_id={last_msg.message_id}]\n{combined}"
-        await _run_agent_and_reply(bot, last_msg, chat_id, agent_msg, context_warn=True)
+        await _run_agent_and_reply(bot, last_msg, chat_id, agent_msg)
 
     buf["task"] = asyncio.create_task(_flush())
 

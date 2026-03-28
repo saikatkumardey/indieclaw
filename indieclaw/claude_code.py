@@ -7,6 +7,7 @@ import re
 import shutil
 import time
 from dataclasses import dataclass, field
+from html import unescape
 
 from loguru import logger
 
@@ -127,7 +128,9 @@ def get_session_info(chat_id: str) -> str | None:
     if session.pending_queue:
         parts.append(f"\n📨 {len(session.pending_queue)} queued message(s)")
     parts.append("")
-    parts.append("/cc &lt;msg&gt;  ·  /cc stop")
+    parts.append(
+        "/cc &lt;msg&gt;  ·  /cc stop"
+    )
     cmds = sorted(get_cc_commands(chat_id) - {"compact", "cost", "context"})
     if cmds:
         parts.append("/cc " + "  /cc ".join(cmds))
@@ -161,40 +164,52 @@ def _html_escape(text: str) -> str:
     )
 
 
+_RE_CODE_FENCE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
+_RE_INLINE_CODE = re.compile(r"`([^`]+)`")
+_RE_MD_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_RE_MD_ITALIC = re.compile(r"(?<!\w)\*([^*]+?)\*(?!\w)")
+_RE_MD_HEADING = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+_RE_MD_LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_RE_MD_STRIKE = re.compile(r"~~(.+?)~~")
+_RE_MD_BLOCKQUOTE = re.compile(
+    r"(^&gt;\s?.+(?:\n&gt;\s?.+)*)", re.MULTILINE
+)
+_RE_MD_BQ_PREFIX = re.compile(r"^&gt;\s?", re.MULTILINE)
+_RE_MD_BULLET = re.compile(r"^[\-\*]\s+", re.MULTILINE)
+_RE_MD_NUMBERED = re.compile(r"^(\d+)\.\s+", re.MULTILINE)
+_RE_HTML_TAGS = re.compile(r"</?(?:b|i|code|pre|a|s|blockquote)[^>]*>")
+
+
 def _md_to_tg_html(text: str) -> str:
     """Convert CommonMark markdown (already HTML-escaped) to Telegram HTML tags."""
     # Code fences → <pre><code> (must come before inline transforms)
-    text = re.sub(
-        r"```(\w*)\n(.*?)```",
+    text = _RE_CODE_FENCE.sub(
         lambda m: f"<pre><code class=\"language-{m.group(1)}\">{m.group(2)}</code></pre>"
         if m.group(1)
         else f"<pre>{m.group(2)}</pre>",
         text,
-        flags=re.DOTALL,
     )
     # Inline code
-    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+    text = _RE_INLINE_CODE.sub(r"<code>\1</code>", text)
     # Bold: **text** → <b>text</b>
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = _RE_MD_BOLD.sub(r"<b>\1</b>", text)
     # Italic: *text* (but not inside words or after bold)
-    text = re.sub(r"(?<!\w)\*([^*]+?)\*(?!\w)", r"<i>\1</i>", text)
+    text = _RE_MD_ITALIC.sub(r"<i>\1</i>", text)
     # Headers → bold
-    text = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
+    text = _RE_MD_HEADING.sub(r"<b>\1</b>", text)
     # Links: [text](url) → <a href="url">text</a>
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+    text = _RE_MD_LINK.sub(r'<a href="\2">\1</a>', text)
     # Strikethrough: ~~text~~ → <s>text</s>
-    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
+    text = _RE_MD_STRIKE.sub(r"<s>\1</s>", text)
     # Blockquotes: "> text" → Telegram <blockquote>
-    text = re.sub(
-        r"(^&gt;\s?.+(?:\n&gt;\s?.+)*)",
-        lambda m: "<blockquote>" + re.sub(r"^&gt;\s?", "", m.group(0), flags=re.MULTILINE) + "</blockquote>",
+    text = _RE_MD_BLOCKQUOTE.sub(
+        lambda m: "<blockquote>" + _RE_MD_BQ_PREFIX.sub("", m.group(0)) + "</blockquote>",
         text,
-        flags=re.MULTILINE,
     )
     # Bullet lists: leading "- " or "* " → "• "
-    text = re.sub(r"^[\-\*]\s+", "• ", text, flags=re.MULTILINE)
+    text = _RE_MD_BULLET.sub("• ", text)
     # Numbered lists: "1. " → "1. " (keep but normalize indentation)
-    text = re.sub(r"^(\d+)\.\s+", r"\1. ", text, flags=re.MULTILINE)
+    text = _RE_MD_NUMBERED.sub(r"\1. ", text)
     return text
 
 
@@ -312,11 +327,7 @@ def _build_display(session: CCSession, done: bool = False) -> str:
 
 
 def _strip_html(text: str) -> str:
-    from html import unescape
-    for tag in ("b", "i", "code", "pre", "a", "s", "blockquote"):
-        text = re.sub(rf"<{tag}[^>]*>", "", text)
-        text = text.replace(f"</{tag}>", "")
-    return unescape(text)
+    return unescape(_RE_HTML_TAGS.sub("", text))
 
 
 async def _send_typing(session: CCSession, bot) -> None:
@@ -487,7 +498,10 @@ async def _drain_queue(session: CCSession, bot) -> None:
     if not session.session_id:
         await bot.send_message(
             chat_id=session.chat_id,
-            text="💻 Queued message dropped — session has no resume ID. Send /cc &lt;prompt&gt; to start fresh.",
+            text=(
+                "💻 Queued message dropped — session has no resume ID."
+                " Send /cc &lt;prompt&gt; to start fresh."
+            ),
             parse_mode="HTML",
         )
         return

@@ -218,14 +218,15 @@ def _parse_session_file(f, query_lower: str, chat_filter: str, limit: int) -> li
         return []
     results = []
     try:
-        for line in f.read_text().splitlines():
-            if not line.strip():
-                continue
-            entry = json.loads(line)
-            if _entry_matches(entry, query_lower, chat_filter):
-                results.append(_format_entry(entry))
-                if len(results) >= limit:
-                    break
+        with f.open() as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if _entry_matches(entry, query_lower, chat_filter):
+                    results.append(_format_entry(entry))
+                    if len(results) >= limit:
+                        break
     except Exception:
         return results  # best-effort: return what we got
     return results

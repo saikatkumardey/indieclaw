@@ -257,7 +257,7 @@ def _should_skip_cron_job(job: dict) -> bool:
 def _schedule_cron_job(scheduler: BackgroundScheduler, job: dict) -> None:
     # If deliver_to is explicitly set (even to ""), respect it.
     # Only fall back to default_chat_id() when the key is absent.
-    deliver_to = job.get("deliver_to", None)
+    deliver_to = job.get("deliver_to")
     if deliver_to is None:
         deliver_to = default_chat_id()
     job_timeout = int(job.get("timeout", _CRON_TIMEOUT_SECONDS))

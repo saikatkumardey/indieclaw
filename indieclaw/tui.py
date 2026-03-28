@@ -264,7 +264,7 @@ class IndieClawApp(App):
 
     async def action_reset_session(self) -> None:
         await self.query_one(ChatView).remove_children()
-        await reset_session(CHAT_ID, clear_resume=True)
+        await reset_session(CHAT_ID)
         await self._append_bubble("Session reset.", "system")
 
     async def _append_bubble(self, text: str, variant: str) -> None:
