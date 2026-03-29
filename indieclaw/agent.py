@@ -182,7 +182,7 @@ def session_log(chat_id: str, role: str, content: str | dict) -> None:
         with open(path, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception as e:
-        logger.warning("session_log failed: %s", e)
+        logger.warning("session_log failed: {}", e)
 
 # ---------------------------------------------------------------------------
 # Hooks

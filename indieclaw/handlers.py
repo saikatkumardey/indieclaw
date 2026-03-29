@@ -246,7 +246,7 @@ async def _run_agent_and_reply_streaming(
         if message:
             await message.reply_text("Stopped.")
     except Exception as e:
-        logger.exception("Streaming error: %s", e)
+        logger.exception("Streaming error: {}", e)
         if message:
             await message.reply_text(_classify_error(e))
     finally:
@@ -268,12 +268,9 @@ async def _drain_followups(bot, chat_id: str) -> None:
     queued = _pending_followups.pop(chat_id, None)
     if not queued:
         return
-    # Take the last message (most recent intent), discard earlier ones
-    followup = queued[-1]
-    skipped = len(queued) - 1
-    if skipped:
-        logger.info("Skipped %d queued messages for %s, processing last", skipped, chat_id)
-    agent_msg = f"[chat_id={chat_id}]\n{followup}"
+    combined = "\n".join(queued)
+    logger.info("Processing {} queued message(s) for {}", len(queued), chat_id)
+    agent_msg = f"[chat_id={chat_id}]\n{combined}"
     await _run_agent_and_reply(bot, None, chat_id, agent_msg)
 
 
@@ -294,13 +291,14 @@ async def _run_agent_and_reply(
             async with _TypingLoop(bot, chat_id):
                 reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
             if not reply or _is_tool_noise(reply):
+                await _send_reply(bot, message, chat_id, "\u2705 Done.")
                 return
             await _send_reply(bot, message, chat_id, reply)
         except asyncio.CancelledError:
             if message:
                 await message.reply_text("Stopped.")
         except Exception as e:
-            logger.exception("Error: %s", e)
+            logger.exception("Error: {}", e)
             if message:
                 await message.reply_text(_classify_error(e))
     finally:
@@ -390,7 +388,7 @@ async def on_btw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         btw_reply = f"\U0001f4ac {reply}" if reply else "(no response)"
         await _reply_chunked(msg, btw_reply)
     except Exception as e:
-        logger.exception("Error handling /btw: %s", e)
+        logger.exception("Error handling /btw: {}", e)
         await msg.reply_text(_classify_error(e))
 
 
@@ -467,7 +465,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chat_id = str(update.effective_chat.id)
     text = msg.text or ""
     is_edit = update.edited_message is not None
-    logger.info("%s [%s]: %s", "Edit" if is_edit else "Incoming", chat_id, text[:80])
+    logger.info("{} [{}]: {}", "Edit" if is_edit else "Incoming", chat_id, text[:80])
 
     # Route to CC session if one is active (no debounce)
     from .claude_code import continue_session, get_busy_hint, has_active_session, is_session_busy
@@ -501,7 +499,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
     except Exception:
-        logger.debug("typing indicator failed for %s", chat_id)
+        logger.debug("typing indicator failed for {}", chat_id)
 
     # Cancel previous debounce timer if still waiting
     if buf["task"] is not None and not buf["task"].done():
@@ -543,7 +541,7 @@ async def on_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not emojis:
         return
     emoji_str = " ".join(emojis)
-    logger.info("Reaction [%s]: %s", chat_id, emoji_str)
+    logger.info("Reaction [{}]: {}", chat_id, emoji_str)
     await _run_agent_and_reply(context.bot, None, chat_id, f"[User reacted to a previous message with: {emoji_str}]")
 
 
@@ -558,7 +556,7 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         dest = workspace.UPLOADS_DIR / f"{voice.file_unique_id}.ogg"
         await file.download_to_drive(str(dest))
     except Exception as e:
-        logger.exception("Error downloading voice: %s", e)
+        logger.exception("Error downloading voice: {}", e)
         await update.message.reply_text(_classify_error(e))
         return
     agent_msg = (
@@ -580,7 +578,7 @@ async def on_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         dest = workspace.UPLOADS_DIR / f"{video.file_unique_id}.{ext}"
         await file.download_to_drive(str(dest))
     except Exception as e:
-        logger.exception("Error downloading video: %s", e)
+        logger.exception("Error downloading video: {}", e)
         await update.message.reply_text(_classify_error(e))
         return
     duration = getattr(video, "duration", 0)
@@ -603,7 +601,7 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         dest = workspace.UPLOADS_DIR / safe_name
         await file.download_to_drive(str(dest))
     except Exception as e:
-        logger.exception("Error downloading document: %s", e)
+        logger.exception("Error downloading document: {}", e)
         await update.message.reply_text(_classify_error(e))
         return
     mime = doc.mime_type or "application/octet-stream"
@@ -624,7 +622,7 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         dest = workspace.UPLOADS_DIR / f"{photo.file_unique_id}.jpg"
         await file.download_to_drive(str(dest))
     except Exception as e:
-        logger.exception("Error downloading photo: %s", e)
+        logger.exception("Error downloading photo: {}", e)
         await update.message.reply_text(_classify_error(e))
         return
     agent_msg = f"[chat_id={chat_id} message_id={update.message.message_id}]\n[User sent a photo. Saved to: {dest}]\n\n{caption}"

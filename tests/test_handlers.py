@@ -779,3 +779,63 @@ class TestOnStart:
         reply = update.message.reply_text.call_args[0][0]
         assert "456" in reply
         assert "indieclaw setup" in reply
+
+
+# ---------------------------------------------------------------------------
+# _drain_followups — should combine all queued messages, not drop earlier ones
+# ---------------------------------------------------------------------------
+
+class TestDrainFollowups:
+    @pytest.mark.asyncio
+    async def test_all_queued_messages_are_combined(self, monkeypatch):
+        """All queued messages should be sent to the agent, not just the last."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import _drain_followups, _pending_followups
+
+        captured_msgs = []
+
+        async def mock_agent_run(chat_id, user_message, **kw):
+            captured_msgs.append(user_message)
+            return "ok"
+
+        _pending_followups["123"] = ["first msg", "second msg", "third msg"]
+
+        bot = MagicMock()
+        bot.send_chat_action = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, side_effect=mock_agent_run), \
+             patch("indieclaw.handlers.get_streaming", return_value=False):
+            await _drain_followups(bot, "123")
+
+        assert len(captured_msgs) == 1
+        combined = captured_msgs[0]
+        assert "first msg" in combined
+        assert "second msg" in combined
+        assert "third msg" in combined
+
+
+# ---------------------------------------------------------------------------
+# Tool-noise reply — should send acknowledgment, not silence
+# ---------------------------------------------------------------------------
+
+class TestToolNoiseReply:
+    @pytest.mark.asyncio
+    async def test_tool_noise_sends_acknowledgment(self, monkeypatch):
+        """When agent produces tool-only output, user should get an acknowledgment."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import _run_agent_and_reply
+
+        bot = MagicMock()
+        bot.send_chat_action = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        msg = MagicMock()
+        msg.reply_text = AsyncMock()
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value="(no response)"), \
+             patch("indieclaw.handlers.get_streaming", return_value=False):
+            await _run_agent_and_reply(bot, msg, "123", "do something")
+
+        # Should have sent SOME reply to the user
+        assert msg.reply_text.await_count > 0 or bot.send_message.await_count > 0
