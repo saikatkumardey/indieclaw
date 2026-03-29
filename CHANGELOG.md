@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.4] - 2026-03-29
+
+- feat: detect and retry lazy ignorance claims
+
+
 ## [0.1.3] - 2026-03-29
 
 - fix: combine all queued messages instead of dropping earlier ones
