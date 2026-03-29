@@ -2,6 +2,13 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.3] - 2026-03-29
+
+- fix: combine all queued messages instead of dropping earlier ones
+- test: audit — delete 9 bullshit tests, add 12 for uncovered flows
+- ci: update python-doctor badge to 92/100
+
+
 ## [0.1.2] - 2026-03-28
 
 - perf: dead code removal, regex precompilation, lazy file reads
