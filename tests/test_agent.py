@@ -310,3 +310,104 @@ async def test_stall_clears_session_id(tmp_path, monkeypatch):
             assert "stall-clear" not in ag._session_ids
         finally:
             ag._session_ids.pop("stall-clear", None)
+
+
+# ---------------------------------------------------------------------------
+# Lazy ignorance detection
+# ---------------------------------------------------------------------------
+
+class TestLazyIgnoranceCheck:
+    def test_ignorance_detected_without_memory_tools(self):
+        from indieclaw.agent import _is_lazy_ignorance
+        # Claims ignorance, used no memory-related tools
+        assert _is_lazy_ignorance("I don't have context about that.", {"Bash", "Write"}) is True
+
+    def test_ignorance_not_flagged_when_memory_checked(self):
+        from indieclaw.agent import _is_lazy_ignorance
+        # Claims ignorance but DID check memory
+        assert _is_lazy_ignorance("I don't have context about that.", {"Read", "Bash"}) is False
+
+    def test_ignorance_not_flagged_when_sessions_searched(self):
+        from indieclaw.agent import _is_lazy_ignorance
+        assert _is_lazy_ignorance("I don't recall that.", {"mcp__indieclaw__search_sessions"}) is False
+
+    def test_normal_reply_not_flagged(self):
+        from indieclaw.agent import _is_lazy_ignorance
+        assert _is_lazy_ignorance("Here's what I found in the logs.", set()) is False
+
+    def test_tools_used_tracked_per_turn(self, tmp_path, monkeypatch):
+        """_tools_used_this_turn should accumulate all tool names during a run."""
+        _patch_workspace(tmp_path, monkeypatch)
+        import indieclaw.agent as ag
+
+        # Simulate PreToolUse hook firing
+        ag._tools_used_this_turn["track-test"] = set()
+        ag._tools_used_this_turn["track-test"].add("Bash")
+        ag._tools_used_this_turn["track-test"].add("Read")
+        ag._tools_used_this_turn["track-test"].add("Bash")  # duplicate
+        assert ag._tools_used_this_turn["track-test"] == {"Bash", "Read"}
+        ag._tools_used_this_turn.pop("track-test", None)
+
+    @pytest.mark.asyncio
+    async def test_lazy_reply_triggers_retry(self, tmp_path, monkeypatch):
+        """If agent claims ignorance without checking memory, run() should retry."""
+        _patch_workspace(tmp_path, monkeypatch)
+        import indieclaw.agent as ag
+
+        call_count = 0
+
+        async def _fake_recv_lazy():
+            """First call: lazy ignorance. Second call: real answer."""
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                msg = MagicMock(spec=ag.AssistantMessage)
+                block = MagicMock(spec=ag.TextBlock)
+                block.text = "I don't have any context about that conversation."
+                msg.content = [block]
+                yield msg
+            else:
+                msg = MagicMock(spec=ag.AssistantMessage)
+                block = MagicMock(spec=ag.TextBlock)
+                block.text = "Based on the session logs, here's what happened."
+                msg.content = [block]
+                yield msg
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.receive_response = MagicMock(side_effect=lambda: _fake_recv_lazy())
+
+        with patch("indieclaw.agent.ClaudeSDKClient", return_value=mock_client), \
+             patch("indieclaw.agent.reload_dynamic_tools"):
+            result = await ag.run(chat_id="lazy-test", user_message="what did we discuss?")
+            assert "session logs" in result
+            assert call_count == 2  # retried once
+
+    @pytest.mark.asyncio
+    async def test_genuine_ignorance_not_retried_twice(self, tmp_path, monkeypatch):
+        """If retry also claims ignorance, accept it (don't loop forever)."""
+        _patch_workspace(tmp_path, monkeypatch)
+        import indieclaw.agent as ag
+
+        def _always_ignorant():
+            async def _gen():
+                msg = MagicMock(spec=ag.AssistantMessage)
+                block = MagicMock(spec=ag.TextBlock)
+                block.text = "I don't know about that."
+                msg.content = [block]
+                yield msg
+            return _gen()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.receive_response = MagicMock(side_effect=lambda: _always_ignorant())
+
+        with patch("indieclaw.agent.ClaudeSDKClient", return_value=mock_client), \
+             patch("indieclaw.agent.reload_dynamic_tools"):
+            result = await ag.run(chat_id="genuine-test", user_message="what is X?")
+            # Should return the ignorance reply after max 1 retry
+            assert "don't know" in result.lower()
+            # query called at most 2 times (original + 1 retry)
+            assert mock_client.query.await_count <= 2

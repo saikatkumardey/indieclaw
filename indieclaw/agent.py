@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re as _re
 import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -58,6 +59,7 @@ _last_usage: dict[str, dict] = {}        # chat_id -> last usage dict
 
 _tool_activity: dict[str, str] = {}       # chat_id -> human-readable tool label
 _tool_start_time: dict[str, float] = {}   # chat_id -> monotonic timestamp
+_tools_used_this_turn: dict[str, set[str]] = {}  # chat_id -> all tool names used
 
 _TOOL_LABELS: dict[str, str] = {
     "Bash": "running command",
@@ -91,6 +93,25 @@ def get_tool_activity(chat_id: str) -> tuple[str, float] | None:
 def clear_tool_activity(chat_id: str) -> None:
     _tool_activity.pop(chat_id, None)
     _tool_start_time.pop(chat_id, None)
+    _tools_used_this_turn.pop(chat_id, None)
+
+
+_IGNORANCE_PATTERNS = _re.compile(
+    r"I don'?t (know|have|recall|remember|see|have any context|have context)"
+    r"|I'?m not sure what you'?re referring"
+    r"|no context about"
+    r"|I don'?t have any (information|context|record)",
+    _re.IGNORECASE,
+)
+
+_MEMORY_TOOLS = {"Read", "mcp__indieclaw__search_sessions", "WebFetch"}
+
+
+def _is_lazy_ignorance(reply: str, tools_used: set[str]) -> bool:
+    """True if the reply claims ignorance but no memory/log tools were used."""
+    if not _IGNORANCE_PATTERNS.search(reply):
+        return False
+    return not tools_used.intersection(_MEMORY_TOOLS)
 
 # ---------------------------------------------------------------------------
 # Dynamic MCP server (module-level, reloaded per message)
@@ -195,6 +216,7 @@ def _make_hooks(chat_id: str) -> dict:
         logger.debug("Tool: {} ({})", tool_name, input_data["tool_use_id"])
         _tool_activity[chat_id] = _tool_label(tool_name)
         _tool_start_time[chat_id] = _time.monotonic()
+        _tools_used_this_turn.setdefault(chat_id, set()).add(tool_name)
         return SyncHookJSONOutput()
     return {"PreToolUse": [HookMatcher(hooks=[_on_tool_call])]}
 
@@ -334,6 +356,44 @@ def _handle_result(chat_id: str, msg: ResultMessage) -> None:
     _record_result(chat_id, msg)
 
 
+async def _run_once(chat_id: str, user_message: str, options) -> str:
+    """Execute a single agent turn, returning the reply text."""
+    cfg = Config.load()
+    initial_timeout = cfg.get("agent_initial_timeout")
+    stall = cfg.get("agent_stall_timeout")
+
+    first_event = True
+    try:
+        loop = asyncio.get_event_loop()
+        deadline = asyncio.timeout(initial_timeout)
+        logger.debug("SDK run start for {} (initial={}s, stall={}s)", chat_id, initial_timeout, stall)
+        async with deadline, ClaudeSDKClient(options=options) as client:
+            await client.query(user_message)
+            parts: list[str] = []
+            async for msg in client.receive_response():
+                if first_event:
+                    logger.debug("First SDK event for {} after startup", chat_id)
+                    first_event = False
+                deadline.reschedule(loop.time() + stall)
+                if isinstance(msg, AssistantMessage):
+                    parts.extend(_collect_text(msg))
+                elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
+                    logger.info("SDK compacted context for {}", chat_id)
+                elif isinstance(msg, ResultMessage):
+                    _handle_result(chat_id, msg)
+
+        return "\n".join(parts) or "(no response)"
+    except TimeoutError:
+        phase = "initial" if first_event else "inter-event"
+        timeout_val = initial_timeout if first_event else stall
+        logger.warning("Agent stalled ({} phase, {}s) for {}", phase, timeout_val, chat_id)
+        _session_ids.pop(chat_id, None)
+        return f"Stalled — no events for {timeout_val}s ({phase}). Try again or /stop."
+    except Exception as e:
+        logger.exception("Agent error for {}: {}: {}", chat_id, type(e).__name__, e)
+        return f"Something went wrong ({type(e).__name__}). Please try again."
+
+
 async def run(chat_id: str, user_message: str) -> str:
     reload_dynamic_tools()
     lock = _session_locks[chat_id]
@@ -342,40 +402,19 @@ async def run(chat_id: str, user_message: str) -> str:
         options = _make_options(chat_id, resume=session_id)
         timestamped = _timestamp_message(user_message)
         session_log(chat_id, "user", user_message)
-        cfg = Config.load()
-        initial_timeout = cfg.get("agent_initial_timeout")
-        stall = cfg.get("agent_stall_timeout")
+        _tools_used_this_turn.pop(chat_id, None)
 
-        first_event = True
-        try:
-            loop = asyncio.get_event_loop()
-            deadline = asyncio.timeout(initial_timeout)
-            logger.debug("SDK run start for {} (initial={}s, stall={}s)", chat_id, initial_timeout, stall)
-            async with deadline, ClaudeSDKClient(options=options) as client:
-                await client.query(timestamped)
-                parts: list[str] = []
-                async for msg in client.receive_response():
-                    if first_event:
-                        logger.debug("First SDK event for {} after startup", chat_id)
-                        first_event = False
-                    deadline.reschedule(loop.time() + stall)
-                    if isinstance(msg, AssistantMessage):
-                        parts.extend(_collect_text(msg))
-                    elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
-                        logger.info("SDK compacted context for {}", chat_id)
-                    elif isinstance(msg, ResultMessage):
-                        _handle_result(chat_id, msg)
+        reply = await _run_once(chat_id, timestamped, options)
 
-            reply = "\n".join(parts) or "(no response)"
-        except TimeoutError:
-            phase = "initial" if first_event else "inter-event"
-            timeout_val = initial_timeout if first_event else stall
-            logger.warning("Agent stalled ({} phase, {}s) for {}", phase, timeout_val, chat_id)
-            _session_ids.pop(chat_id, None)
-            reply = f"Stalled — no events for {timeout_val}s ({phase}). Try again or /stop."
-        except Exception as e:
-            logger.exception("Agent error for {}: {}: {}", chat_id, type(e).__name__, e)
-            reply = f"Something went wrong ({type(e).__name__}). Please try again."
+        # Lazy ignorance check: retry once with a nudge if agent claimed
+        # ignorance without checking session logs or memory
+        tools_used = _tools_used_this_turn.get(chat_id, set())
+        if _is_lazy_ignorance(reply, tools_used):
+            logger.info("Lazy ignorance detected for {}, retrying with nudge", chat_id)
+            _tools_used_this_turn.pop(chat_id, None)
+            nudge = "[System: You claimed ignorance without checking. Search session logs and read MEMORY.md before responding.]"
+            options = _make_options(chat_id, resume=_session_ids.get(chat_id))
+            reply = await _run_once(chat_id, nudge, options)
 
     session_log(chat_id, "assistant", reply)
     clear_tool_activity(chat_id)
