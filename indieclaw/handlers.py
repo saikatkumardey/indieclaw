@@ -110,6 +110,18 @@ _ERROR_MESSAGES = {
 }
 
 
+async def _notify_error(bot, message, chat_id: str, e: Exception) -> None:
+    """Send an error notification regardless of whether this is a message or reaction."""
+    text = _classify_error(e)
+    if message:
+        await message.reply_text(text)
+        return
+    try:
+        await bot.send_message(chat_id=int(chat_id), text=text)
+    except Exception:
+        logger.debug("failed to send error notification for chat_id={}", chat_id)
+
+
 def _classify_error(e: Exception) -> str:
     for cls in type(e).__mro__:
         if cls in _ERROR_MESSAGES:
@@ -299,8 +311,7 @@ async def _run_agent_and_reply(
                 await message.reply_text("Stopped.")
         except Exception as e:
             logger.exception("Error: {}", e)
-            if message:
-                await message.reply_text(_classify_error(e))
+            await _notify_error(bot, message, chat_id, e)
     finally:
         _active_runs.pop(chat_id, None)
         await _drain_followups(bot, chat_id)
@@ -542,6 +553,10 @@ async def on_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     emoji_str = " ".join(emojis)
     logger.info("Reaction [{}]: {}", chat_id, emoji_str)
+    active = _active_runs.get(chat_id)
+    if active and not active.done():
+        _pending_followups.setdefault(chat_id, []).append(f"[User reacted with: {emoji_str}]")
+        return
     await _run_agent_and_reply(context.bot, None, chat_id, f"[User reacted to a previous message with: {emoji_str}]")
 
 
