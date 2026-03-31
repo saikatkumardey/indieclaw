@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.5] - 2026-03-31
+
+- fix: queue reactions when agent is busy, notify on reaction errors
+
+
 ## [0.1.4] - 2026-03-29
 
 - feat: detect and retry lazy ignorance claims
