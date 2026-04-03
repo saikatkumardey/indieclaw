@@ -91,9 +91,16 @@ def _to_telegram_html(text: str) -> str:
     return "".join(result)
 
 
+_TOOL_NOISE_PHRASES = {
+    "(no response)",
+    "No response requested.",
+    "No response needed.",
+    "No reply needed.",
+}
+
 def _is_tool_noise(reply: str) -> bool:
     """Return True if the reply is a default tool-only response with no real content."""
-    return reply == "(no response)" or reply.startswith("Done. (used:")
+    return reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:")
 
 
 def _format_activity(label: str, elapsed: float) -> str:
