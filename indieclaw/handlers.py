@@ -255,7 +255,7 @@ async def _run_agent_and_reply_streaming(
                     return
                 await _send_reply(bot, message, chat_id, data)
     except asyncio.CancelledError:
-        if message:
+        if message and chat_id not in _debounce_buffers:
             await message.reply_text("Stopped.")
     except Exception as e:
         logger.exception("Streaming error: {}", e)
@@ -307,7 +307,9 @@ async def _run_agent_and_reply(
                 return
             await _send_reply(bot, message, chat_id, reply)
         except asyncio.CancelledError:
-            if message:
+            # If debounce buffer exists for this chat, we're being interrupted
+            # by a new message — stay silent, the restart will handle it.
+            if message and chat_id not in _debounce_buffers:
                 await message.reply_text("Stopped.")
         except Exception as e:
             logger.exception("Error: {}", e)
@@ -489,12 +491,27 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if continued:
             return
 
-    # If agent is already running, queue the message instead of competing
+    # If agent is already running, either interrupt or queue based on config
     active = _active_runs.get(chat_id)
     if active and not active.done():
-        _pending_followups.setdefault(chat_id, []).append(text)
-        await msg.reply_text("Queued — will process after current run.")
-        return
+        from .config import Config
+        interrupt = Config.load().get("interrupt_on_message", True)
+        if interrupt:
+            # Cancel the running task and combine with new message via debounce
+            active.cancel()
+            _active_runs.pop(chat_id, None)
+            # Move any already-queued followups into the debounce buffer
+            prior = _pending_followups.pop(chat_id, [])
+            buf = _debounce_buffers.get(chat_id)
+            if buf is None:
+                buf = {"messages": [], "task": None, "last_msg": msg, "bot": context.bot}
+                _debounce_buffers[chat_id] = buf
+            buf["messages"].extend(prior)
+            # Fall through to normal debounce below — new message gets added there
+        else:
+            _pending_followups.setdefault(chat_id, []).append(text)
+            await msg.reply_text("Queued — will process after current run.")
+            return
 
     # Debounce: accumulate rapid messages, process after pause
     buf = _debounce_buffers.get(chat_id)
