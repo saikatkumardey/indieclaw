@@ -315,8 +315,11 @@ async def _run_agent_and_reply(
             logger.exception("Error: {}", e)
             await _notify_error(bot, message, chat_id, e)
     finally:
-        _active_runs.pop(chat_id, None)
-        await _drain_followups(bot, chat_id)
+        # Only clean up if we're still the active task — interrupt_on_message may
+        # have already replaced us with a new run before our finally fires.
+        if _active_runs.get(chat_id) is asyncio.current_task():
+            _active_runs.pop(chat_id, None)
+            await _drain_followups(bot, chat_id)
 
 
 async def on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
