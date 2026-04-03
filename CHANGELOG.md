@@ -2,6 +2,14 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.7] - 2026-04-03
+
+- fix: don't pop active_runs or drain followups if superseded by interrupt
+- add interrupt_on_message: cancel active run on new message instead of queuing
+- simplify self_update: check remote version, pip install from git
+- fix self_update to git pull + pip install for local repo checkouts
+
+
 ## [0.1.5] - 2026-03-31
 
 - fix: queue reactions when agent is busy, notify on reaction errors
