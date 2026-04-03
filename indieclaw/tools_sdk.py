@@ -96,41 +96,17 @@ async def self_update(args: dict) -> dict:
         return _text(f"Error: INDIECLAW_SOURCE {source!r} is not an allowed update URL.")
 
     old_version = _local_version()
+    remote = await asyncio.to_thread(_check_remote_version, source)
 
-    # Detect repo directory from this file's location
-    repo_dir = Path(__file__).resolve().parent.parent
+    if remote and remote == old_version:
+        return _text(f"Already on latest version (v{old_version}). No update needed.")
 
-    # Try git pull first if we're in a local repo checkout
-    if (repo_dir / ".git").exists():
-        pull = await asyncio.to_thread(
-            subprocess.run,
-            ["git", "pull", "--ff-only"],
-            capture_output=True, text=True, timeout=30, cwd=str(repo_dir),
-        )
-        if pull.returncode != 0:
-            return _text(f"Git pull failed:\n{pull.stderr}")
-
-        # Check if version changed after pull
-        remote = await asyncio.to_thread(_check_remote_version, source)
-        if remote and remote == old_version and "Already up to date" in pull.stdout:
-            return _text(f"Already on latest version (v{old_version}). No update needed.")
-
-        # Reinstall from local repo
-        result = await asyncio.to_thread(
-            subprocess.run,
-            ["pip3", "install", "-e", ".", "--break-system-packages", "-q"],
-            capture_output=True, text=True, timeout=120, cwd=str(repo_dir),
-        )
-    else:
-        # Fallback: remote install via uv
-        remote = await asyncio.to_thread(_check_remote_version, source)
-        if remote and remote == old_version:
-            return _text(f"Already on latest version (v{old_version}). No update needed.")
-        result = await asyncio.to_thread(
-            subprocess.run,
-            ["uv", "tool", "install", "--upgrade", source],
-            capture_output=True, text=True, timeout=120,
-        )
+    # Install latest from git
+    result = await asyncio.to_thread(
+        subprocess.run,
+        ["pip3", "install", "--upgrade", "--break-system-packages", source],
+        capture_output=True, text=True, timeout=120,
+    )
 
     chat_id = default_chat_id()
     if result.returncode != 0:
