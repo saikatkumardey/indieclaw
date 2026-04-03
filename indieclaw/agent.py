@@ -232,7 +232,14 @@ def _make_agents(chat_id: str) -> dict[str, AgentDefinition] | None:
         "task-runner": AgentDefinition(
             description="Runs long autonomous tasks: research, file operations, web browsing, code generation. Use for anything that may take multiple tool-use turns.",
             prompt="You are a task runner for IndieClaw. Complete the delegated task autonomously. Use tools as needed. Be concise in your final response.",
-            tools=["Bash", "Read", "Write", "WebSearch", "WebFetch", "mcp__indieclaw__*", "mcp__dynamic__*"],
+            tools=[
+                "Bash", "Read", "Write", "WebSearch", "WebFetch",
+                "mcp__indieclaw__browse", "mcp__indieclaw__browser_click",
+                "mcp__indieclaw__browser_eval", "mcp__indieclaw__browser_screenshot",
+                "mcp__indieclaw__browser_type", "mcp__indieclaw__web_fetch",
+                "mcp__indieclaw__read_skill", "mcp__indieclaw__search_sessions",
+                "mcp__dynamic__*",
+            ],
         ),
     }
 
