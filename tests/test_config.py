@@ -88,7 +88,7 @@ def test_to_dict(tmp_path, monkeypatch):
     cfg = Config.load()
     d = cfg.to_dict()
     assert isinstance(d, dict)
-    assert set(d.keys()) == {"model", "effort", "max_turns", "btw_model", "cron_model", "subconscious_enabled", "subconscious_interval_hours", "subconscious_model", "streaming", "debounce_seconds", "max_budget_usd", "agent_stall_timeout", "agent_initial_timeout"}
+    assert set(d.keys()) == {"model", "effort", "max_turns", "btw_model", "cron_model", "subconscious_enabled", "subconscious_interval_hours", "subconscious_model", "streaming", "debounce_seconds", "max_budget_usd", "agent_stall_timeout", "agent_initial_timeout", "interrupt_on_message"}
 
 
 def test_atomic_write_creates_file(tmp_path, monkeypatch):
