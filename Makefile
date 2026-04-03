@@ -1,7 +1,11 @@
 # indieclaw release automation
-# Usage: make release V=0.8.0
+# Usage:
+#   make release          — bump patch (0.1.7 → 0.1.8), commit, tag, push
+#   make release V=1.2.3  — release a specific version
 
 CURRENT_VERSION := $(shell python3 -c "import re; print(re.search(r'version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
+NEXT_PATCH      := $(shell python3 -c "v='$(CURRENT_VERSION)'.split('.'); v[2]=str(int(v[2])+1); print('.'.join(v))")
+V               ?= $(NEXT_PATCH)
 
 .PHONY: release version
 
@@ -9,9 +13,6 @@ version:
 	@echo $(CURRENT_VERSION)
 
 release:
-ifndef V
-	$(error Usage: make release V=x.y.z (current: $(CURRENT_VERSION)))
-endif
 	@echo "Releasing indieclaw $(CURRENT_VERSION) → $(V)"
 	@# Update version in pyproject.toml
 	sed -i 's/^version = "$(CURRENT_VERSION)"/version = "$(V)"/' pyproject.toml
@@ -36,9 +37,10 @@ endif
 	@echo "  CHANGELOG.md updated"
 	@# Lock file
 	uv lock 2>/dev/null || true
-	@# Stage, commit, tag
+	@# Stage, commit, tag, push
 	git add pyproject.toml CHANGELOG.md uv.lock
 	git commit -m "release: v$(V)"
 	git tag -a "v$(V)" -m "v$(V)"
+	git push && git push --tags
 	@echo ""
-	@echo "Done. Tagged v$(V). Push with: git push && git push --tags"
+	@echo "Released v$(V)"
