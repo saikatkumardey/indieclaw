@@ -2,6 +2,13 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.8] - 2026-04-03
+
+- fix: filter 'No response requested.' as tool noise
+- fix: make release auto-bumps patch and pushes, no V= required
+- fix: add interrupt_on_message to test_to_dict expected keys
+
+
 ## [0.1.7] - 2026-04-03
 
 - fix: don't pop active_runs or drain followups if superseded by interrupt
