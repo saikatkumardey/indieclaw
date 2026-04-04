@@ -90,6 +90,10 @@ def get_tool_activity(chat_id: str) -> tuple[str, float] | None:
     return label, _time.monotonic() - start
 
 
+def get_tools_used(chat_id: str) -> set[str]:
+    return set(_tools_used_this_turn.get(chat_id, set()))
+
+
 def clear_tool_activity(chat_id: str) -> None:
     _tool_activity.pop(chat_id, None)
     _tool_start_time.pop(chat_id, None)

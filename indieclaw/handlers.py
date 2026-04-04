@@ -13,6 +13,7 @@ from . import workspace
 from .agent import (
     get_streaming,
     get_tool_activity,
+    get_tools_used,
     reset_session,
     session_log,
 )
@@ -98,9 +99,12 @@ _TOOL_NOISE_PHRASES = {
     "No reply needed.",
 }
 
-def _is_tool_noise(reply: str) -> bool:
+def _is_tool_noise(reply: str, chat_id: str = "") -> bool:
     """Return True if the reply is a default tool-only response with no real content."""
-    return reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:")
+    if reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:"):
+        return True
+    # Suppress final text reply if Donna already sent a message via telegram_send
+    return bool(chat_id and "telegram_send" in get_tools_used(chat_id))
 
 
 def _format_activity(label: str, elapsed: float) -> str:
@@ -258,7 +262,7 @@ async def _run_agent_and_reply_streaming(
                 accumulated.append(data)
             elif event_type == "done":
                 done_event.set()
-                if not data or _is_tool_noise(data):
+                if not data or _is_tool_noise(data, chat_id):
                     return
                 await _send_reply(bot, message, chat_id, data)
     except asyncio.CancelledError:
@@ -309,8 +313,9 @@ async def _run_agent_and_reply(
         try:
             async with _TypingLoop(bot, chat_id):
                 reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
-            if not reply or _is_tool_noise(reply):
-                await _send_reply(bot, message, chat_id, "\u2705 Done.")
+            if not reply or _is_tool_noise(reply, chat_id):
+                if "telegram_send" not in get_tools_used(chat_id):
+                    await _send_reply(bot, message, chat_id, "\u2705 Done.")
                 return
             await _send_reply(bot, message, chat_id, reply)
         except asyncio.CancelledError:
