@@ -402,9 +402,23 @@ def _rtk_install(rtk_bin: Path) -> bool:
         return False
 
 
+def _rtk_patch_hook_path() -> None:
+    """Ensure ~/.local/bin is in PATH inside the rtk hook script (needed when system PATH is narrow)."""
+    hook = Path.home() / ".claude/hooks/rtk-rewrite.sh"
+    if not hook.exists():
+        return
+    content = hook.read_text()
+    inject = 'export PATH="$HOME/.local/bin:$PATH"\n'
+    if inject not in content:
+        lines = content.splitlines(keepends=True)
+        lines.insert(1, inject)
+        hook.write_text("".join(lines))
+
+
 def _rtk_configure_hook(rtk_exe: str) -> bool:
     result = subprocess.run([rtk_exe, "init", "-g", "--auto-patch"], capture_output=True, text=True)
     if result.returncode == 0:
+        _rtk_patch_hook_path()
         _success("rtk hook configured in ~/.claude/settings.json")
         return True
     # auto-patch failed — patch manually
@@ -417,6 +431,7 @@ def _rtk_configure_hook(rtk_exe: str) -> bool:
         if not any(isinstance(h, dict) and h.get("matcher") == "Bash" for h in pre):
             pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": hook_script}]})
         settings_path.write_text(json.dumps(data, indent=2))
+        _rtk_patch_hook_path()
         _success("rtk hook configured manually in ~/.claude/settings.json")
         return True
     except Exception as e:
