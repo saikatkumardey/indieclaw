@@ -6,6 +6,26 @@ from claude_agent_sdk import ResultMessage
 
 from . import workspace
 
+_PRICING: dict[str, dict[str, float]] = {
+    "claude-opus-4-6":           {"input": 15.0, "output": 75.0, "cache_read": 1.5, "cache_write": 18.75},
+    "claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0, "cache_read": 0.3, "cache_write": 3.75},
+    "claude-haiku-4-5-20251001": {"input": 0.8,  "output": 4.0,  "cache_read": 0.08, "cache_write": 1.0},
+}
+
+_FALLBACK_MODEL = "claude-sonnet-4-6"
+
+
+def estimate_cost(model: str, input_tokens: int, output_tokens: int,
+                  cache_read: int = 0, cache_write: int = 0) -> float:
+    rates = _PRICING.get(model, _PRICING[_FALLBACK_MODEL])
+    return (
+        input_tokens * rates["input"]
+        + output_tokens * rates["output"]
+        + cache_read * rates["cache_read"]
+        + cache_write * rates["cache_write"]
+    ) / 1_000_000
+
+
 _ZERO_TOKENS = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0, "turns": 0}
 
 

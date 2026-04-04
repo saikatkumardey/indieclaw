@@ -84,3 +84,28 @@ class TestLoad:
         loaded = SessionState.load()
         sess = loaded.get_session("chat1")
         assert sess["input_tokens"] == 100
+
+
+class TestEstimateCost:
+    def test_sonnet_cost(self):
+        from indieclaw.session_state import estimate_cost
+        cost = estimate_cost("claude-sonnet-4-6", input_tokens=1000, output_tokens=500)
+        assert abs(cost - 0.0105) < 0.0001
+
+    def test_haiku_cost(self):
+        from indieclaw.session_state import estimate_cost
+        cost = estimate_cost("claude-haiku-4-5-20251001", input_tokens=1000, output_tokens=500)
+        assert abs(cost - 0.0028) < 0.0001
+
+    def test_cache_tokens_reduce_cost(self):
+        from indieclaw.session_state import estimate_cost
+        cost = estimate_cost("claude-sonnet-4-6", input_tokens=1000, output_tokens=500,
+                             cache_read=800, cache_write=200)
+        expected = 0.003 + 0.0075 + 0.00024 + 0.00075
+        assert abs(cost - expected) < 0.0001
+
+    def test_unknown_model_falls_back_to_sonnet(self):
+        from indieclaw.session_state import estimate_cost
+        sonnet_cost = estimate_cost("claude-sonnet-4-6", input_tokens=1000, output_tokens=500)
+        unknown_cost = estimate_cost("claude-future-99", input_tokens=1000, output_tokens=500)
+        assert sonnet_cost == unknown_cost
