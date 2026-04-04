@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.29] - 2026-04-04
+
+- feat: auto-inject recent context on new session start
+
+
 ## [0.1.28] - 2026-04-04
 
 - feat: richer error classification with actionable messages
