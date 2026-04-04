@@ -154,16 +154,6 @@ class _TypingLoop:
     async def _loop(self):
         try:
             while True:
-                activity = get_tool_activity(self._chat_id)
-                if activity:
-                    label, elapsed = activity
-                    status = _format_activity(label, elapsed)
-                    try:
-                        await self._bot.send_message_draft(
-                            chat_id=int(self._chat_id), draft_id=_DRAFT_ID, text=status,
-                        )
-                    except Exception:
-                        logger.debug("send_message_draft failed in typing loop", exc_info=True)
                 try:
                     await self._bot.send_chat_action(chat_id=self._chat_id, action="typing")
                 except asyncio.CancelledError:
@@ -222,30 +212,29 @@ async def _send_reply(bot, message, chat_id: str, reply: str) -> None:
             await bot.send_message(chat_id=chat_id, text=fmt)
 
 
-_DRAFT_INTERVAL = 0.5  # minimum seconds between draft updates
-_DRAFT_ID = 1  # constant draft_id; same ID = animated updates
+_PREVIEW_INTERVAL = 1.0  # seconds between live preview edits
 
 
-async def _draft_sender(bot, chat_id: str, accumulated: list[str], done_event: asyncio.Event) -> None:
+async def _preview_sender(bot, chat_id: str, accumulated: list[str], done_event: asyncio.Event, placeholder_id: list) -> None:
+    """Edit the placeholder message with streamed content + tool activity."""
+    last_text = ""
     while not done_event.is_set():
-        draft_text = ""
+        preview = ""
         activity = get_tool_activity(chat_id)
         if activity:
             label, elapsed = activity
-            draft_text = _format_activity(label, elapsed)
+            preview = _format_activity(label, elapsed)
         if accumulated:
             content = "".join(accumulated)[:MAX_TG_MSG - 200]
-            if draft_text:
-                draft_text = f"{draft_text}\n\n{content}"
-            else:
-                draft_text = content
-        if draft_text:
+            preview = f"{preview}\n\n{content}" if preview else content
+        if preview and preview != last_text and placeholder_id:
             try:
-                await bot.send_message_draft(chat_id=int(chat_id), draft_id=_DRAFT_ID, text=draft_text)
+                await bot.edit_message_text(chat_id=chat_id, message_id=placeholder_id[0], text=preview)
+                last_text = preview
             except Exception:
-                logger.debug("send_message_draft failed", exc_info=True)
+                logger.debug("preview edit failed", exc_info=True)
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=_DRAFT_INTERVAL)
+            await asyncio.wait_for(done_event.wait(), timeout=_PREVIEW_INTERVAL)
         except TimeoutError:
             pass
 
@@ -253,9 +242,17 @@ async def _draft_sender(bot, chat_id: str, accumulated: list[str], done_event: a
 async def _run_agent_and_reply_streaming(
     bot, message, chat_id: str, agent_msg: str,
 ) -> None:
+    # Send a placeholder that we'll edit with live progress, then delete when done
+    placeholder_id: list[int] = []
+    try:
+        ph = await bot.send_message(chat_id=chat_id, text="\U0001f527 working\u2026")
+        placeholder_id.append(ph.message_id)
+    except Exception:
+        logger.debug("placeholder send failed", exc_info=True)
+
     accumulated: list[str] = []
     done_event = asyncio.Event()
-    sender_task = asyncio.create_task(_draft_sender(bot, chat_id, accumulated, done_event))
+    sender_task = asyncio.create_task(_preview_sender(bot, chat_id, accumulated, done_event, placeholder_id))
     try:
         async for event_type, data in agent_run_streaming(chat_id=chat_id, user_message=agent_msg):
             if event_type == "text_delta":
@@ -279,11 +276,12 @@ async def _run_agent_and_reply_streaming(
             await sender_task
         except asyncio.CancelledError:
             pass
-        # Clear the draft banner so it doesn't linger as a "pinned message"
-        try:
-            await bot.send_message_draft(chat_id=int(chat_id), draft_id=_DRAFT_ID, text="\u200b")
-        except Exception:
-            logger.debug("draft clear failed")
+        # Delete the placeholder — final reply was already sent
+        if placeholder_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=placeholder_id[0])
+            except Exception:
+                logger.debug("placeholder delete failed", exc_info=True)
 
 
 async def _drain_followups(bot, chat_id: str) -> None:
