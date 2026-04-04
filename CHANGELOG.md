@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.17] - 2026-04-04
+
+- fix: patch rtk hook script to include ~/.local/bin in PATH
+
+
 ## [0.1.16] - 2026-04-04
 
 - feat: rtk token optimizer + strip noise suffix from replies
