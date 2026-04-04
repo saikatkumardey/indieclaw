@@ -71,10 +71,14 @@ def system_prompt_full() -> str:
             parts.append(f"=== {name} ===\n{content.strip()}")
 
     if skills := list_skills(workspace.SKILLS_DIR):
+        skill_lines = "\n".join(
+            f"• {name} — {desc}" if desc else f"• {name}"
+            for name, desc in skills
+        )
         parts.append(
             f"=== AVAILABLE SKILLS ===\n"
-            f"Use the read_skill tool to load a skill's instructions on demand.\n"
-            f"Skills: {', '.join(skills)}"
+            f"Use the read_skill tool to load a skill's instructions on demand.\n\n"
+            f"{skill_lines}"
         )
 
     if memory := workspace.read(workspace.MEMORY):
