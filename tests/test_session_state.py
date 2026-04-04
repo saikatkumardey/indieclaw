@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def _make_result(input_tokens=100, output_tokens=50, turns=1):
+def _make_result(input_tokens=100, output_tokens=50, turns=1, model="claude-sonnet-4-6"):
     result = MagicMock()
     result.usage = {
         "input_tokens": input_tokens,
@@ -17,6 +17,7 @@ def _make_result(input_tokens=100, output_tokens=50, turns=1):
         "cache_creation_input_tokens": 0,
     }
     result.num_turns = turns
+    result.model = model
     return result
 
 
@@ -109,3 +110,63 @@ class TestEstimateCost:
         sonnet_cost = estimate_cost("claude-sonnet-4-6", input_tokens=1000, output_tokens=500)
         unknown_cost = estimate_cost("claude-future-99", input_tokens=1000, output_tokens=500)
         assert sonnet_cost == unknown_cost
+
+
+class TestModelTracking:
+    def test_records_model_counts(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        from indieclaw.session_state import SessionState
+        state = SessionState()
+        state.record_turn("chat1", _make_result(model="claude-sonnet-4-6"))
+        state.record_turn("chat1", _make_result(model="claude-sonnet-4-6"))
+        state.record_turn("chat1", _make_result(model="claude-haiku-4-5-20251001"))
+        usage = state.get_usage_today()
+        assert usage["models"]["claude-sonnet-4-6"] == 2
+        assert usage["models"]["claude-haiku-4-5-20251001"] == 1
+
+    def test_records_cost(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        from indieclaw.session_state import SessionState
+        state = SessionState()
+        state.record_turn("chat1", _make_result(input_tokens=1000, output_tokens=500, model="claude-sonnet-4-6"))
+        usage = state.get_usage_today()
+        assert usage["cost_usd"] > 0
+
+
+class TestUsageHistory:
+    def test_rollover_pushes_to_history(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        from indieclaw.session_state import SessionState
+        state = SessionState()
+        state.record_turn("chat1", _make_result(100, 50))
+        # Simulate yesterday
+        state._data["usage_today"]["date"] = "2026-04-03"
+        state._data["usage_today"]["cost_usd"] = 0.05
+        # New turn triggers rollover
+        state.record_turn("chat1", _make_result(200, 75))
+        history = state.get_usage_history()
+        assert len(history) == 1
+        assert history[0]["date"] == "2026-04-03"
+        assert history[0]["cost_usd"] == 0.05
+
+    def test_history_capped_at_7_days(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        from indieclaw.session_state import SessionState
+        state = SessionState()
+        state._data["usage_history"] = [
+            {"date": f"2026-03-{25+i:02d}", "input_tokens": 100, "output_tokens": 50,
+             "cache_read_tokens": 0, "cache_write_tokens": 0, "turns": 1, "cost_usd": 0.01, "models": {}}
+            for i in range(7)
+        ]
+        state._data["usage_today"]["date"] = "2026-04-01"
+        state._data["usage_today"]["cost_usd"] = 0.02
+        state.record_turn("chat1", _make_result(100, 50))
+        history = state.get_usage_history()
+        assert len(history) == 7
+        assert history[-1]["date"] == "2026-04-01"
+
+    def test_get_usage_history_empty_by_default(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        from indieclaw.session_state import SessionState
+        state = SessionState()
+        assert state.get_usage_history() == []

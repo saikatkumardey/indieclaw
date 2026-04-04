@@ -28,6 +28,8 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int,
 
 _ZERO_TOKENS = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0, "turns": 0}
 
+_HISTORY_MAX = 7
+
 
 class SessionState:
     def __init__(self, data: dict | None = None) -> None:
@@ -35,11 +37,15 @@ class SessionState:
             "version": 1,
             "updated_at": None,
             "sessions": {},
-            "usage_today": {"date": None, **_ZERO_TOKENS},
+            "usage_today": {"date": None, **_ZERO_TOKENS, "cost_usd": 0.0, "models": {}},
+            "usage_history": [],
         }
         self._data.setdefault("version", 1)
         self._data.setdefault("sessions", {})
-        self._data.setdefault("usage_today", {"date": None, **_ZERO_TOKENS})
+        self._data.setdefault("usage_today", {"date": None, **_ZERO_TOKENS, "cost_usd": 0.0, "models": {}})
+        self._data.setdefault("usage_history", [])
+        self._data["usage_today"].setdefault("cost_usd", 0.0)
+        self._data["usage_today"].setdefault("models", {})
 
     def record_turn(self, chat_id: str, result: ResultMessage) -> None:
         now = datetime.now(timezone.utc)
@@ -50,6 +56,8 @@ class SessionState:
         output_tokens = usage.get("output_tokens", 0)
         cache_read = usage.get("cache_read_input_tokens", 0)
         cache_write = usage.get("cache_creation_input_tokens", 0)
+        _raw_model = getattr(result, "model", "")
+        model = _raw_model if isinstance(_raw_model, str) else ""
 
         turns = result.num_turns or 1
 
@@ -65,7 +73,8 @@ class SessionState:
 
         usage_today = self._data["usage_today"]
         if usage_today.get("date") != today:
-            usage_today.update(date=today, **_ZERO_TOKENS)
+            self._roll_history(usage_today)
+            usage_today.update(date=today, **_ZERO_TOKENS, cost_usd=0.0, models={})
 
         usage_today["input_tokens"] += input_tokens
         usage_today["output_tokens"] += output_tokens
@@ -73,8 +82,33 @@ class SessionState:
         usage_today["cache_write_tokens"] += cache_write
         usage_today["turns"] += turns
 
+        cost = estimate_cost(model, input_tokens, output_tokens, cache_read, cache_write)
+        usage_today["cost_usd"] = round(usage_today.get("cost_usd", 0.0) + cost, 6)
+        usage_today.setdefault("models", {})[model] = usage_today["models"].get(model, 0) + 1
+
         self._data["updated_at"] = now.isoformat()
         self._save()
+
+    def _roll_history(self, old_today: dict) -> None:
+        if not old_today.get("date"):
+            return
+        snapshot = {
+            "date": old_today["date"],
+            "input_tokens": old_today.get("input_tokens", 0),
+            "output_tokens": old_today.get("output_tokens", 0),
+            "cache_read_tokens": old_today.get("cache_read_tokens", 0),
+            "cache_write_tokens": old_today.get("cache_write_tokens", 0),
+            "turns": old_today.get("turns", 0),
+            "cost_usd": old_today.get("cost_usd", 0.0),
+            "models": dict(old_today.get("models", {})),
+        }
+        history = self._data["usage_history"]
+        history.append(snapshot)
+        if len(history) > _HISTORY_MAX:
+            del history[:-_HISTORY_MAX]
+
+    def get_usage_history(self) -> list[dict]:
+        return list(self._data.get("usage_history", []))
 
     def get_session(self, chat_id: str) -> dict:
         return dict(self._data["sessions"].get(chat_id, {}))
@@ -83,7 +117,7 @@ class SessionState:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         usage = self._data["usage_today"]
         if usage.get("date") != today:
-            return {"date": today, **_ZERO_TOKENS}
+            return {"date": today, **_ZERO_TOKENS, "cost_usd": 0.0, "models": {}}
         return dict(usage)
 
     def to_dict(self) -> dict:
