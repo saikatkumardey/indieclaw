@@ -12,14 +12,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def _patch_workspace(tmp_path, monkeypatch):
+    import indieclaw.config as cfg_mod
     import indieclaw.workspace as ws
     monkeypatch.setattr(ws, "HOME", tmp_path)
     for name, attr in [("SOUL.md", "SOUL"), ("USER.md", "USER"),
-                        ("MEMORY.md", "MEMORY"), ("skills", "SKILLS_DIR")]:
+                        ("MEMORY.md", "MEMORY"), ("skills", "SKILLS_DIR"),
+                        ("indieclaw.json", "CONFIG"), ("session_state.json", "SESSION_STATE")]:
         monkeypatch.setattr(ws, attr, tmp_path / name)
     (tmp_path / "sessions").mkdir(exist_ok=True)
     (tmp_path / "SOUL.md").write_text("## Identity\nNot set yet")
     (tmp_path / "USER.md").write_text("Not set yet")
+    (tmp_path / "indieclaw.json").write_text("{}")
+    monkeypatch.setattr(cfg_mod, "_cache", None)  # invalidate stale config cache
 
 
 def _make_fake_receive(text="OK"):

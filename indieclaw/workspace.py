@@ -77,7 +77,7 @@ def read_template(name: str) -> str:
 def read(path: Path, default: str = "") -> str:
     try:
         return path.read_text()
-    except FileNotFoundError:
+    except OSError:
         return default
 
 
@@ -89,6 +89,7 @@ def read_json(path: Path) -> dict:
 
 
 def write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as f:

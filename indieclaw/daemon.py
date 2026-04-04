@@ -31,7 +31,7 @@ def _is_indieclaw_process(pid: int) -> bool:
         )
         return "indieclaw" in result.stdout.lower()
     except (OSError, subprocess.TimeoutExpired):
-        return True
+        return False  # fail-safe: don't assume it's ours
 
 
 def is_running() -> tuple[bool, int | None]:
@@ -44,6 +44,9 @@ def is_running() -> tuple[bool, int | None]:
         delete_pid()
         return False, None
     except PermissionError:
+        if not _is_indieclaw_process(pid):
+            delete_pid()
+            return False, None
         return True, pid
     if not _is_indieclaw_process(pid):
         delete_pid()

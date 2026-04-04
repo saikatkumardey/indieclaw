@@ -77,6 +77,28 @@ class TestIsRunning:
         assert running is True
         assert pid == os.getpid()
 
+    def test_permission_error_checks_process_identity(self, tmp_path, monkeypatch):
+        """PermissionError should still verify the process is indieclaw."""
+        _patch_pid_file(tmp_path, monkeypatch)
+        from indieclaw.daemon import is_running, write_pid
+        write_pid(99999)
+        with patch("os.kill", side_effect=PermissionError), \
+             patch("indieclaw.daemon._is_indieclaw_process", return_value=False):
+            running, pid = is_running()
+        assert running is False
+        assert pid is None
+
+    def test_permission_error_returns_true_if_indieclaw(self, tmp_path, monkeypatch):
+        """PermissionError with confirmed indieclaw process should return True."""
+        _patch_pid_file(tmp_path, monkeypatch)
+        from indieclaw.daemon import is_running, write_pid
+        write_pid(99999)
+        with patch("os.kill", side_effect=PermissionError), \
+             patch("indieclaw.daemon._is_indieclaw_process", return_value=True):
+            running, pid = is_running()
+        assert running is True
+        assert pid == 99999
+
 
 class TestIsIndieclawProcess:
     def test_matches_indieclaw(self, monkeypatch):
@@ -97,16 +119,16 @@ class TestIsIndieclawProcess:
         with patch("subprocess.run", return_value=result):
             assert _is_indieclaw_process(123) is False
 
-    def test_os_error_returns_true(self):
-        """If ps fails with OSError, assume it could be indieclaw (safe default)."""
+    def test_os_error_returns_false(self):
+        """If ps fails with OSError, don't assume it's ours (fail-safe)."""
         from indieclaw.daemon import _is_indieclaw_process
         with patch("subprocess.run", side_effect=OSError("no ps")):
-            assert _is_indieclaw_process(123) is True
+            assert _is_indieclaw_process(123) is False
 
-    def test_timeout_returns_true(self):
-        """If ps times out, assume it could be indieclaw (safe default)."""
+    def test_timeout_returns_false(self):
+        """If ps times out, don't assume it's ours (fail-safe)."""
         import subprocess
 
         from indieclaw.daemon import _is_indieclaw_process
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ps", 5)):
-            assert _is_indieclaw_process(123) is True
+            assert _is_indieclaw_process(123) is False

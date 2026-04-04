@@ -230,8 +230,8 @@ async def _post_shutdown(app, scheduler) -> None:
     try:
         from .browser import BrowserManager
         await BrowserManager.get().close_all()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Browser cleanup failed during shutdown: {}", e)
     scheduler.shutdown(wait=False)
     from .daemon import delete_pid
     delete_pid()
@@ -269,6 +269,13 @@ def _start_daemon() -> None:
             [exe, "start", "--foreground"],
             stdout=log_fh, stderr=log_fh, start_new_session=True,
         )
+
+    import time
+    time.sleep(0.5)
+    if proc.poll() is not None:
+        typer.echo(f"IndieClaw failed to start (exit code {proc.returncode}). Check logs: indieclaw logs")
+        raise typer.Exit(1)
+
     write_pid(proc.pid)
     typer.echo(f"IndieClaw started (PID {proc.pid}). Run 'indieclaw logs' to view output.")
 

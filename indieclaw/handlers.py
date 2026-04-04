@@ -95,7 +95,13 @@ def _maybe_schedule_followup(bot, chat_id: str, reply: str) -> None:
         )
         await _run_agent_and_reply(bot, None, chat_id, prompt)
 
-    _followup_timers[chat_id] = asyncio.create_task(_fire())
+    def _on_followup_done(t: asyncio.Task) -> None:
+        if not t.cancelled() and t.exception():
+            logger.warning("Follow-up task failed for {}: {}", chat_id, t.exception())
+
+    task = asyncio.create_task(_fire())
+    task.add_done_callback(_on_followup_done)
+    _followup_timers[chat_id] = task
 
 
 async def flush_debounce(chat_id: str) -> None:
@@ -145,12 +151,17 @@ _TOOL_NOISE_PHRASES = {
     "(No message — standing by.)",
 }
 
+def _used_telegram_send(chat_id: str) -> bool:
+    """Check if telegram_send was used this turn (handles MCP-namespaced tool names)."""
+    return any(t.endswith("telegram_send") for t in get_tools_used(chat_id))
+
+
 def _is_tool_noise(reply: str, chat_id: str = "") -> bool:
     """Return True if the reply is a default tool-only response with no real content."""
     if reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:"):
         return True
     # Suppress final text reply if Donna already sent a message via telegram_send
-    return bool(chat_id and "telegram_send" in get_tools_used(chat_id))
+    return bool(chat_id and _used_telegram_send(chat_id))
 
 
 def _format_activity(label: str, elapsed: float) -> str:
@@ -254,8 +265,9 @@ async def _send_reply(bot, message, chat_id: str, reply: str) -> None:
         fmt = _to_telegram_html(reply)
         try:
             await bot.send_message(chat_id=chat_id, text=fmt, parse_mode="HTML")
-        except Exception:
-            await bot.send_message(chat_id=chat_id, text=fmt)
+        except Exception as html_err:
+            logger.debug("HTML send failed, falling back to plain text: {}", html_err)
+            await bot.send_message(chat_id=chat_id, text=_strip_html(fmt))
 
 
 _PREVIEW_INTERVAL = 1.0  # seconds between live preview edits
@@ -359,7 +371,7 @@ async def _run_agent_and_reply(
             async with _TypingLoop(bot, chat_id):
                 reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
             if not reply or _is_tool_noise(reply, chat_id):
-                if "telegram_send" not in get_tools_used(chat_id):
+                if not _used_telegram_send(chat_id):
                     await _send_reply(bot, message, chat_id, "\u2705 Done.")
                 return
             await _send_reply(bot, message, chat_id, reply)

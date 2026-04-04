@@ -192,11 +192,15 @@ def _cleanup_idle_browsers() -> None:
         # Use run_coroutine_threadsafe to run cleanup there.
         if _main_loop and _main_loop.is_running():
             future = asyncio.run_coroutine_threadsafe(mgr.cleanup_idle(), _main_loop)
-            future.result(timeout=30)
+            try:
+                future.result(timeout=30)
+            except TimeoutError:
+                logger.warning("Browser cleanup timed out after 30s")
+                future.cancel()
         else:
             asyncio.run(mgr.cleanup_idle())
     except Exception as e:
-        logger.debug("Browser cleanup skipped: {}", e)
+        logger.warning("Browser cleanup failed: {}", e)
 
 
 def _cleanup_idle_cc_sessions() -> None:
@@ -207,7 +211,7 @@ def _cleanup_idle_cc_sessions() -> None:
         if removed:
             logger.info("Cleaned up {} idle CC session(s)", removed)
     except Exception as e:
-        logger.debug("CC session cleanup skipped: {}", e)
+        logger.warning("CC session cleanup failed: {}", e)
 
 
 def _schedule_builtin_jobs(scheduler: BackgroundScheduler) -> None:

@@ -48,6 +48,9 @@ def _make_sdk_tool(name: str, desc: str, properties: dict, _required: list, exec
 
     @tool(name, desc, input_schema)
     async def _dyn_tool(args: dict) -> dict:
+        missing = [k for k in _required if k not in args]
+        if missing:
+            return {"content": [{"type": "text", "text": f"Error: missing required params: {', '.join(missing)}"}]}
         kwargs = {k: args.get(k) for k in properties}
         result = await asyncio.to_thread(execute_fn, **kwargs)
         return {"content": [{"type": "text", "text": str(result)}]}

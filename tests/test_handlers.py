@@ -862,6 +862,29 @@ class TestToolNoiseReply:
         for call in msg.reply_text.await_args_list:
             assert "standing by" not in call.args[0].lower()
 
+    @pytest.mark.asyncio
+    async def test_telegram_send_suppresses_done(self, monkeypatch):
+        """When agent used telegram_send, don't send an extra 'Done.' message."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import _run_agent_and_reply
+
+        bot = MagicMock()
+        bot.send_chat_action = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        msg = MagicMock()
+        msg.reply_text = AsyncMock()
+
+        # Simulate agent using telegram_send (MCP-namespaced) and returning noise
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value="(no response)"), \
+             patch("indieclaw.handlers.get_streaming", return_value=False), \
+             patch("indieclaw.handlers.get_tools_used", return_value={"mcp__indieclaw__telegram_send"}):
+            await _run_agent_and_reply(bot, msg, "123", "send me a summary")
+
+        # Should NOT have sent "Done." — telegram_send already delivered the reply
+        for call in msg.reply_text.await_args_list:
+            assert "Done" not in call.args[0], f"Unexpected 'Done.' reply: {call.args[0]}"
+
 
 # ---------------------------------------------------------------------------
 # Promise follow-up
