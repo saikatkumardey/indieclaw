@@ -151,7 +151,7 @@ class TestAuthFailureTracking:
     def test_auth_error_increments_counter(self, mock_send):
         """Auth error (401) sends alert after 3 consecutive failures."""
         exc = RuntimeError("API returned 401 Unauthorized")
-        for i in range(3):
+        for _ in range(3):
             _sched._handle_auth_failure("test-job", exc, "123")
         assert _sched._auth_fail_count == 3
         # First 2 calls are regular failure notifications, 3rd triggers alert

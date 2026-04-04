@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import getpass
+import json
+import platform
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
 import questionary
@@ -354,6 +360,81 @@ def _patch_cron_deliver_to(env: dict[str, str]) -> None:
         pass
 
 
+_RTK_VERSION = "v0.34.3"
+
+
+def _rtk_asset() -> str | None:
+    arch = platform.machine()
+    os_name = platform.system().lower()
+    if os_name == "linux":
+        suffix = "unknown-linux-musl" if arch == "x86_64" else "unknown-linux-gnu"
+        return f"rtk-{arch}-{suffix}.tar.gz"
+    if os_name == "darwin":
+        return f"rtk-{arch}-apple-darwin.tar.gz"
+    return None
+
+
+def _rtk_install(rtk_bin: Path) -> bool:
+    asset = _rtk_asset()
+    if not asset:
+        _warn("rtk auto-install not supported on this platform. Install manually: https://github.com/rtk-ai/rtk")
+        return False
+    _info(f"Downloading rtk {_RTK_VERSION}…")
+    url = f"https://github.com/rtk-ai/rtk/releases/download/{_RTK_VERSION}/{asset}"
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tar_path = Path(tmpdir) / "rtk.tar.gz"
+            urllib.request.urlretrieve(url, tar_path)
+            with tarfile.open(tar_path) as tf:
+                safe_members = [m for m in tf.getmembers() if not m.name.startswith(("/", ".."))]
+                tf.extractall(tmpdir, members=safe_members)
+            candidates = [f for f in Path(tmpdir).rglob("rtk") if f.is_file() and f.name == "rtk"]
+            if not candidates:
+                _warn("Could not find rtk binary in archive.")
+                return False
+            rtk_bin.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidates[0], rtk_bin)
+            rtk_bin.chmod(0o755)
+        _success("rtk installed")
+        return True
+    except Exception as e:
+        _warn(f"rtk download failed: {e}")
+        return False
+
+
+def _rtk_configure_hook(rtk_exe: str) -> bool:
+    result = subprocess.run([rtk_exe, "init", "-g", "--auto-patch"], capture_output=True, text=True)
+    if result.returncode == 0:
+        _success("rtk hook configured in ~/.claude/settings.json")
+        return True
+    # auto-patch failed — patch manually
+    settings_path = Path.home() / ".claude/settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+        hook_script = str(Path.home() / ".claude/hooks/rtk-rewrite.sh")
+        pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
+        if not any(isinstance(h, dict) and h.get("matcher") == "Bash" for h in pre):
+            pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": hook_script}]})
+        settings_path.write_text(json.dumps(data, indent=2))
+        _success("rtk hook configured manually in ~/.claude/settings.json")
+        return True
+    except Exception as e:
+        _warn(f"Could not patch settings.json: {e}")
+        return False
+
+
+def setup_rtk() -> bool:
+    """Install rtk and configure its Claude Code PreToolUse hook. Returns True on success."""
+    rtk_bin = Path.home() / ".local/bin/rtk"
+    if shutil.which("rtk"):
+        _success(f"rtk already installed ({shutil.which('rtk')})")
+    elif not _rtk_install(rtk_bin):
+        return False
+    rtk_exe = shutil.which("rtk") or str(rtk_bin)
+    return _rtk_configure_hook(rtk_exe)
+
+
 def run() -> None:
     from . import workspace
 
@@ -401,3 +482,6 @@ def run() -> None:
     _print_summary(env, workspace.HOME)
     _install_systemd_service(workspace.HOME)
     _install_watchdog(workspace.HOME)
+    console.print()
+    console.print(Rule("Token Optimizer", style="dim"))
+    setup_rtk()

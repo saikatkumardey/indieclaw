@@ -43,6 +43,17 @@ def setup() -> None:
     run()
 
 
+@app.command(name="setup-rtk")
+def setup_rtk() -> None:
+    """Install rtk and configure token-saving hooks for the Bash tool."""
+    from .setup import setup_rtk as _setup_rtk
+    ok = _setup_rtk()
+    if ok:
+        typer.echo("Done. Restart indieclaw for the hook to take effect.")
+    else:
+        raise typer.Exit(1)
+
+
 def _setup_token_prompt_choice(console):
     import questionary
     from rich.panel import Panel

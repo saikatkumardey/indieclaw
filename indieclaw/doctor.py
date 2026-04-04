@@ -253,6 +253,37 @@ def _check_tts_deps() -> CheckResult:
     return CheckResult(Status.WARN, f"Missing {', '.join(missing)} — voice messages (telegram_send_voice) won't work", "Install: pip install edge-tts && apt install ffmpeg")
 
 
+def _check_rtk() -> CheckResult:
+    """Check that rtk is installed and its Claude Code hook is configured."""
+    if not shutil.which("rtk"):
+        return CheckResult(
+            Status.WARN,
+            "rtk not installed — Bash tool output is not token-optimized",
+            "Run: indieclaw setup-rtk  (or install manually: https://github.com/rtk-ai/rtk)",
+        )
+    settings = Path.home() / ".claude/settings.json"
+    hook_configured = False
+    if settings.exists():
+        try:
+            data = json.loads(settings.read_text())
+            hooks = data.get("hooks", {})
+            pre = hooks.get("PreToolUse", [])
+            hook_configured = any(
+                h.get("matcher") == "Bash"
+                for h in pre
+                if isinstance(h, dict)
+            )
+        except (json.JSONDecodeError, KeyError):
+            pass
+    if not hook_configured:
+        return CheckResult(
+            Status.WARN,
+            "rtk installed but hook not configured — run: rtk init -g --auto-patch",
+            "Hooks rewrite Bash commands transparently for 60-90% token savings",
+        )
+    return CheckResult(Status.OK, "rtk installed and hook active (token savings enabled)")
+
+
 def _check_cron_expressions() -> list[CheckResult]:
     crons_path = workspace.CRONS
     if not (crons_path.exists() and crons_path.stat().st_size > 0):
@@ -287,6 +318,7 @@ def _check_runtime() -> list[CheckResult]:
     results.extend(_check_custom_tools())
     results.extend(_check_browser_backend())
     results.append(_check_tts_deps())
+    results.append(_check_rtk())
     results.extend(_check_cron_expressions())
     return results
 

@@ -97,7 +97,8 @@ def get_tools_used(chat_id: str) -> set[str]:
 def clear_tool_activity(chat_id: str) -> None:
     _tool_activity.pop(chat_id, None)
     _tool_start_time.pop(chat_id, None)
-    _tools_used_this_turn.pop(chat_id, None)
+    # _tools_used_this_turn is NOT cleared here — the handler needs it after run() returns.
+    # It is cleared at the start of the next run() via _tools_used_this_turn.pop(chat_id, None).
 
 
 _IGNORANCE_PATTERNS = _re.compile(
@@ -325,6 +326,7 @@ def _timestamp_message(user_message: str) -> str:
 
 
 _HUMAN_TURN_RE = _re.compile(r"\nHuman:\s*\[Current time:", _re.IGNORECASE)
+_NOISE_SUFFIX_RE = _re.compile(r"\n+(No response requested\.|No response needed\.|No reply needed\.)\s*$", _re.IGNORECASE)
 
 
 def _strip_hallucinated_turns(text: str) -> str:
@@ -333,6 +335,11 @@ def _strip_hallucinated_turns(text: str) -> str:
     if m:
         return text[:m.start()].rstrip()
     return text
+
+
+def _strip_noise_suffix(text: str) -> str:
+    """Strip trailing 'No response requested.' and similar phrases the model appends."""
+    return _NOISE_SUFFIX_RE.sub("", text).rstrip()
 
 
 def _extract_stream_delta(msg: StreamEvent) -> str | None:
@@ -426,7 +433,7 @@ async def run(chat_id: str, user_message: str) -> str:
         session_log(chat_id, "user", user_message)
         _tools_used_this_turn.pop(chat_id, None)
 
-        reply = _strip_hallucinated_turns(await _run_once(chat_id, timestamped, options))
+        reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, timestamped, options)))
 
         # Lazy ignorance check: retry once with a nudge if agent claimed
         # ignorance without checking session logs or memory
@@ -436,7 +443,7 @@ async def run(chat_id: str, user_message: str) -> str:
             _tools_used_this_turn.pop(chat_id, None)
             nudge = "[System: You claimed ignorance without checking. Search session logs and read MEMORY.md before responding.]"
             options = _make_options(chat_id, resume=_session_ids.get(chat_id))
-            reply = _strip_hallucinated_turns(await _run_once(chat_id, nudge, options))
+            reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, nudge, options)))
 
     session_log(chat_id, "assistant", reply)
     clear_tool_activity(chat_id)
@@ -478,7 +485,7 @@ async def run_streaming(chat_id: str, user_message: str):
                     elif isinstance(msg, ResultMessage):
                         _handle_result(chat_id, msg)
 
-            reply = _strip_hallucinated_turns("\n".join(parts) or "(no response)")
+            reply = _strip_noise_suffix(_strip_hallucinated_turns("\n".join(parts) or "(no response)"))
         except TimeoutError:
             phase = "initial" if first_event else "inter-event"
             timeout_val = initial_timeout if first_event else stall
