@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.11] - 2026-04-04
+
+- fix: add Python version classifiers for PyPI badge
+
+
 ## [0.1.10] - 2026-04-04
 
 - fix: replace send_message_draft with edit-based preview — no replay animation
