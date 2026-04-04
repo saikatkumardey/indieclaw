@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.27] - 2026-04-04
+
+- feat: skill auto-indexing with descriptions in system prompt
+
+
 ## [0.1.26] - 2026-04-04
 
 - feat: transcribe voice messages via claude CLI before passing to agent
