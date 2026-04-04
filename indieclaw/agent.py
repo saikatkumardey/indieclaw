@@ -459,6 +459,7 @@ def _handle_result(chat_id: str, msg: ResultMessage) -> None:
     if msg.session_id:
         _session_ids[chat_id] = msg.session_id
     _last_usage[chat_id] = msg.usage or {}
+    _last_usage[chat_id]["_model"] = getattr(msg, "model", "") or ""
     _record_result(chat_id, msg)
 
 
