@@ -2,6 +2,14 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.28] - 2026-04-04
+
+- feat: richer error classification with actionable messages
+- release: v0.1.27
+- feat: skill auto-indexing with descriptions in system prompt
+- ci: update python-doctor badge to 90/100
+
+
 ## [0.1.27] - 2026-04-04
 
 - feat: skill auto-indexing with descriptions in system prompt
