@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.16] - 2026-04-04
+
+- feat: rtk token optimizer + strip noise suffix from replies
+
+
 ## [0.1.15] - 2026-04-04
 
 
