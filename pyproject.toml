@@ -1,6 +1,6 @@
 [project]
 name = "indieclaw"
-version = "0.1.17"
+version = "0.1.18"
 description = "Self-hosted Telegram AI agent. 10 tools, skills, subconscious, CLI learning."
 readme = "README.md"
 requires-python = ">=3.12"

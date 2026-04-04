@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re as _re
+import subprocess
 import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -215,6 +216,41 @@ def session_log(chat_id: str, role: str, content: str | dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+_RTK_PATHS = [
+    "/home/claude-user/.local/bin/rtk",
+    "/usr/local/bin/rtk",
+]
+
+
+def _rtk_bin() -> str | None:
+    import shutil
+    found = shutil.which("rtk")
+    if found:
+        return found
+    for p in _RTK_PATHS:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _rtk_rewrite(cmd: str) -> tuple[str, bool]:
+    """Rewrite a shell command via `rtk rewrite`. Returns (rewritten_cmd, changed)."""
+    rtk = _rtk_bin()
+    if not rtk:
+        return cmd, False
+    try:
+        result = subprocess.run(
+            [rtk, "rewrite", cmd],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode in (0, 3) and result.stdout.strip():
+            rewritten = result.stdout.strip()
+            return rewritten, rewritten != cmd
+    except Exception as e:
+        logger.debug("RTK rewrite failed: {}", e)
+    return cmd, False
+
+
 def _make_hooks(chat_id: str) -> dict:
     async def _on_tool_call(input_data: PreToolUseHookInput, tool_use_id: str | None, context) -> SyncHookJSONOutput:
         tool_name = input_data["tool_name"]
@@ -222,6 +258,19 @@ def _make_hooks(chat_id: str) -> dict:
         _tool_activity[chat_id] = _tool_label(tool_name)
         _tool_start_time[chat_id] = _time.monotonic()
         _tools_used_this_turn.setdefault(chat_id, set()).add(tool_name)
+
+        if tool_name == "Bash":
+            cmd = (input_data.get("tool_input") or {}).get("command", "")
+            if cmd:
+                rewritten, changed = _rtk_rewrite(cmd)
+                if changed:
+                    return SyncHookJSONOutput(hookSpecificOutput={
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "permissionDecisionReason": "RTK auto-rewrite",
+                        "updatedInput": {**input_data.get("tool_input", {}), "command": rewritten},
+                    })
+
         return SyncHookJSONOutput()
     return {"PreToolUse": [HookMatcher(hooks=[_on_tool_call])]}
 
