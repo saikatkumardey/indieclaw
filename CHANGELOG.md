@@ -2,6 +2,17 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.25] - 2026-04-04
+
+- style: reformat import line
+- feat: extended /status dashboard with tool timing, cost, and history
+- feat: store model name in _last_usage for status display
+- feat: per-tool timing via PostToolUse hook
+- feat: add model/cost tracking and 7-day usage history to SessionState
+- feat: add estimate_cost helper for token-to-dollar pricing
+- ci: update python-doctor badge to 91/100
+
+
 ## [0.1.23] - 2026-04-04
 
 - fix: 12 silent bugs — daemon safety, telegram_send suppression, test hangs
