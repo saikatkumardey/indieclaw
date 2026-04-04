@@ -517,6 +517,46 @@ async def web_fetch(args: dict) -> dict:
         return _text(f"Error fetching {url}: {type(e).__name__}: {e}")
 
 
+_BOT_COMMANDS = [
+    ("start",     "Wake the bot"),
+    ("help",      "Show available commands"),
+    ("status",    "Show model, workspace, tool counts"),
+    ("model",     "Switch Claude model (opus/sonnet/haiku)"),
+    ("reset",     "Clear conversation history"),
+    ("stop",      "Cancel the current agent run"),
+    ("crons",     "List scheduled jobs"),
+    ("restart",   "Restart the bot process"),
+    ("update",    "Update indieclaw and restart"),
+    ("btw",       "Ask a side question (no history)"),
+    ("effort",    "Set thinking effort level"),
+    ("cc",        "Start a live Claude Code session"),
+    ("streaming", "Toggle response streaming"),
+]
+
+
+@tool("sync_commands", "Re-register all bot commands with Telegram so they show in the / menu.", {})
+async def sync_commands(args: dict) -> dict:
+    import json as _json
+    import urllib.error
+    import urllib.request
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return _text("Error: TELEGRAM_BOT_TOKEN not set.")
+    url = f"https://api.telegram.org/bot{token}/setMyCommands"
+    payload = _json.dumps({"commands": [{"command": c, "description": d} for c, d in _BOT_COMMANDS]}).encode()
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+            result = _json.loads(resp.read())
+        if result.get("ok"):
+            return _text(f"OK — registered {len(_BOT_COMMANDS)} commands with Telegram.")
+        return _text(f"Telegram API error: {result}")
+    except urllib.error.HTTPError as e:
+        return _text(f"HTTP {e.code}: {e.read().decode()}")
+    except Exception as e:
+        return _text(f"Error: {e}")
+
+
 CUSTOM_TOOLS = [
     telegram_send, telegram_edit, telegram_send_file, self_restart, self_update,
     update_config, read_skill_tool, search_sessions,
@@ -524,5 +564,5 @@ CUSTOM_TOOLS = [
     telegram_send_voice, telegram_react,
     test_tool, deploy_tool, disable_tool,
     update_subconscious, reflect,
-    web_fetch,
+    web_fetch, sync_commands,
 ]

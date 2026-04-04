@@ -203,8 +203,13 @@ def _preflight_checks() -> bool:
 
 
 async def _post_init(app, scheduler, commands) -> None:
+    from loguru import logger
     from telegram import BotCommand
-    await app.bot.set_my_commands([BotCommand(name, desc) for name, _, desc in commands if desc is not None])
+    try:
+        await app.bot.set_my_commands([BotCommand(name, desc) for name, _, desc in commands if desc is not None])
+        logger.info("set_my_commands: registered {} commands", sum(1 for _, _, d in commands if d is not None))
+    except Exception as e:
+        logger.error("set_my_commands failed: {}", e)
     from .scheduler import set_main_loop
     set_main_loop(asyncio.get_running_loop())
     scheduler.start()
