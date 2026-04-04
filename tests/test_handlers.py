@@ -1,6 +1,7 @@
 """Handler tests — Telegram message handling, chunking, markdown conversion."""
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -838,3 +839,143 @@ class TestToolNoiseReply:
 
         # Should have sent SOME reply to the user
         assert msg.reply_text.await_count > 0 or bot.send_message.await_count > 0
+
+
+# ---------------------------------------------------------------------------
+# Promise follow-up
+# ---------------------------------------------------------------------------
+
+class TestDetectPromise:
+    def test_detects_ill_phrase(self):
+        from indieclaw.handlers import _detect_promise
+        snippet = _detect_promise("Sure, I'll look into that for you.")
+        assert snippet is not None
+
+    def test_detects_i_will(self):
+        from indieclaw.handlers import _detect_promise
+        snippet = _detect_promise("I will get back to you on this.")
+        assert snippet is not None
+
+    def test_detects_let_me(self):
+        from indieclaw.handlers import _detect_promise
+        snippet = _detect_promise("Let me check the logs and report back.")
+        assert snippet is not None
+
+    def test_detects_will_do(self):
+        from indieclaw.handlers import _detect_promise
+        snippet = _detect_promise("Will do! Give me a moment.")
+        assert snippet is not None
+
+    def test_no_promise_returns_none(self):
+        from indieclaw.handlers import _detect_promise
+        assert _detect_promise("The answer is 42.") is None
+        assert _detect_promise("Here are the results you asked for.") is None
+
+    def test_snippet_is_non_empty_string(self):
+        from indieclaw.handlers import _detect_promise
+        snippet = _detect_promise("I'll set that up shortly.")
+        assert isinstance(snippet, str)
+        assert len(snippet) > 0
+
+    def test_snippet_max_length(self):
+        from indieclaw.handlers import _detect_promise
+        long_reply = "I'll do it. " + "x" * 200
+        snippet = _detect_promise(long_reply)
+        assert snippet is not None
+        assert len(snippet) <= 120
+
+
+class TestMaybeScheduleFollowup:
+    @pytest.mark.asyncio
+    async def test_schedules_task_when_promise_detected(self, monkeypatch):
+        import indieclaw.handlers as _h
+        monkeypatch.setattr(_h, "_followup_timers", {})
+        bot = MagicMock()
+
+        with patch("indieclaw.handlers._detect_promise", return_value="I'll do it"):
+            _h._maybe_schedule_followup(bot, "123", "I'll do it soon.")
+
+        assert "123" in _h._followup_timers
+        _h._followup_timers["123"].cancel()
+
+    @pytest.mark.asyncio
+    async def test_no_task_when_no_promise(self, monkeypatch):
+        import indieclaw.handlers as _h
+        monkeypatch.setattr(_h, "_followup_timers", {})
+        bot = MagicMock()
+
+        with patch("indieclaw.handlers._detect_promise", return_value=None):
+            _h._maybe_schedule_followup(bot, "123", "The answer is 42.")
+
+        assert "123" not in _h._followup_timers
+
+    @pytest.mark.asyncio
+    async def test_replaces_existing_timer(self, monkeypatch):
+        import indieclaw.handlers as _h
+        monkeypatch.setattr(_h, "_followup_timers", {})
+        bot = MagicMock()
+
+        old_task = MagicMock()
+        old_task.done = MagicMock(return_value=False)
+        old_task.cancel = MagicMock()
+        _h._followup_timers["123"] = old_task
+
+        with patch("indieclaw.handlers._detect_promise", return_value="I'll do it"):
+            _h._maybe_schedule_followup(bot, "123", "I'll do it soon.")
+
+        old_task.cancel.assert_called_once()
+        assert _h._followup_timers["123"] is not old_task
+        _h._followup_timers["123"].cancel()
+
+
+class TestFollowupCancelledOnNewMessage:
+    @pytest.mark.asyncio
+    async def test_new_message_cancels_followup_timer(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        import indieclaw.handlers as _h
+        monkeypatch.setattr(_h, "_followup_timers", {})
+
+        pending_task = MagicMock()
+        pending_task.done = MagicMock(return_value=False)
+        pending_task.cancel = MagicMock()
+        _h._followup_timers["123"] = pending_task
+
+        update = _make_update(chat_id="123", text="are you done?")
+        ctx = _make_context()
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value="Done!"), \
+             patch("indieclaw.handlers.get_streaming", return_value=False), \
+             patch("indieclaw.claude_code.has_active_session", return_value=False):
+            await _h.on_message(update, ctx)
+            from indieclaw.handlers import flush_debounce
+            await flush_debounce("123")
+
+        pending_task.cancel.assert_called_once()
+        assert "123" not in _h._followup_timers
+
+
+class TestFollowupFiresAgentRun:
+    @pytest.mark.asyncio
+    async def test_followup_sends_promise_context_to_agent(self, monkeypatch):
+        import indieclaw.handlers as _h
+        monkeypatch.setattr(_h, "_followup_timers", {})
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+
+        captured = []
+
+        async def mock_run(chat_id, user_message, **kw):
+            captured.append(user_message)
+            return "Done!"
+
+        bot = MagicMock()
+        bot.send_chat_action = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, side_effect=mock_run), \
+             patch("indieclaw.handlers.get_streaming", return_value=False), \
+             patch("indieclaw.handlers._FOLLOWUP_DELAY", 0):
+            _h._maybe_schedule_followup(bot, "123", "I'll set that up for you.")
+            await asyncio.sleep(0.05)
+
+        assert len(captured) == 1
+        assert "I'll set that up" in captured[0] or "promise" in captured[0].lower() or "10 minutes" in captured[0]

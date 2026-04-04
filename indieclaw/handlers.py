@@ -51,6 +51,51 @@ _DEBOUNCE_SECONDS = 1.5
 _debounce_buffers: dict[str, dict] = {}
 _active_runs: dict[str, asyncio.Task] = {}  # chat_id -> running agent task
 _pending_followups: dict[str, list[str]] = {}  # chat_id -> queued messages
+_followup_timers: dict[str, asyncio.Task] = {}  # chat_id -> scheduled follow-up task
+_FOLLOWUP_DELAY = 600  # seconds
+
+_PROMISE_RE = re.compile(
+    r"\b(I'?ll|I will|let me|will do|going to|I can do that|I'?ll get back|I'?ll set|I'?ll look|I'?ll check|I'?ll take care)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_promise(text: str) -> str | None:
+    """Return a short snippet if the text contains a promise, else None."""
+    m = _PROMISE_RE.search(text)
+    if not m:
+        return None
+    # Find the sentence containing the match
+    for sentence in re.split(r"[.!?\n]", text):
+        if _PROMISE_RE.search(sentence):
+            snippet = sentence.strip()
+            return snippet[:120] if snippet else None
+    return text[:120]
+
+
+def _cancel_followup_timer(chat_id: str) -> None:
+    task = _followup_timers.pop(chat_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
+def _maybe_schedule_followup(bot, chat_id: str, reply: str) -> None:
+    snippet = _detect_promise(reply)
+    if not snippet:
+        return
+    _cancel_followup_timer(chat_id)
+
+    async def _fire():
+        await asyncio.sleep(_FOLLOWUP_DELAY)
+        _followup_timers.pop(chat_id, None)
+        prompt = (
+            f"[System: {_FOLLOWUP_DELAY // 60} minutes ago you told the user: \"{snippet}\". "
+            "Check whether you've completed this. If done, send a brief confirmation. "
+            "If not, complete it now and report back.]"
+        )
+        await _run_agent_and_reply(bot, None, chat_id, prompt)
+
+    _followup_timers[chat_id] = asyncio.create_task(_fire())
 
 
 async def flush_debounce(chat_id: str) -> None:
@@ -262,6 +307,7 @@ async def _run_agent_and_reply_streaming(
                 if not data or _is_tool_noise(data, chat_id):
                     return
                 await _send_reply(bot, message, chat_id, data)
+                _maybe_schedule_followup(bot, chat_id, data)
     except asyncio.CancelledError:
         if message and chat_id not in _debounce_buffers:
             await message.reply_text("Stopped.")
@@ -316,6 +362,7 @@ async def _run_agent_and_reply(
                     await _send_reply(bot, message, chat_id, "\u2705 Done.")
                 return
             await _send_reply(bot, message, chat_id, reply)
+            _maybe_schedule_followup(bot, chat_id, reply)
         except asyncio.CancelledError:
             # If debounce buffer exists for this chat, we're being interrupted
             # by a new message — stay silent, the restart will handle it.
@@ -503,6 +550,8 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         continued = await continue_session(chat_id, text, context.bot)
         if continued:
             return
+
+    _cancel_followup_timer(chat_id)
 
     # If agent is already running, either interrupt or queue based on config
     active = _active_runs.get(chat_id)
