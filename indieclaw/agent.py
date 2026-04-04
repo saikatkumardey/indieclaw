@@ -19,7 +19,7 @@ from claude_agent_sdk import (
     TextBlock,
     create_sdk_mcp_server,
 )
-from claude_agent_sdk.types import AgentDefinition, HookMatcher, PreToolUseHookInput, SyncHookJSONOutput
+from claude_agent_sdk.types import AgentDefinition, HookMatcher, PostToolUseHookInput, PreToolUseHookInput, SyncHookJSONOutput
 from loguru import logger
 
 from . import workspace
@@ -61,6 +61,8 @@ _last_usage: dict[str, dict] = {}        # chat_id -> last usage dict
 _tool_activity: dict[str, str] = {}       # chat_id -> human-readable tool label
 _tool_start_time: dict[str, float] = {}   # chat_id -> monotonic timestamp
 _tools_used_this_turn: dict[str, set[str]] = {}  # chat_id -> all tool names used
+_tool_timings: dict[str, list[tuple[str, float]]] = {}  # chat_id -> [(tool_name, elapsed_s)]
+_pending_tool_starts: dict[str, dict[str, float]] = {}   # chat_id -> {tool_use_id: start_time}
 
 _TOOL_LABELS: dict[str, str] = {
     "Bash": "running command",
@@ -93,6 +95,17 @@ def get_tool_activity(chat_id: str) -> tuple[str, float] | None:
 
 def get_tools_used(chat_id: str) -> set[str]:
     return set(_tools_used_this_turn.get(chat_id, set()))
+
+
+def _strip_tool_prefix(name: str) -> str:
+    for prefix in ("mcp__indieclaw__", "mcp__dynamic__"):
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+
+def get_tool_timings(chat_id: str) -> list[tuple[str, float]]:
+    return list(_tool_timings.get(chat_id, []))
 
 
 def clear_tool_activity(chat_id: str) -> None:
@@ -258,6 +271,7 @@ def _make_hooks(chat_id: str) -> dict:
         _tool_activity[chat_id] = _tool_label(tool_name)
         _tool_start_time[chat_id] = _time.monotonic()
         _tools_used_this_turn.setdefault(chat_id, set()).add(tool_name)
+        _pending_tool_starts.setdefault(chat_id, {})[input_data["tool_use_id"]] = _time.monotonic()
 
         if tool_name == "Bash":
             cmd = (input_data.get("tool_input") or {}).get("command", "")
@@ -272,7 +286,21 @@ def _make_hooks(chat_id: str) -> dict:
                     })
 
         return SyncHookJSONOutput()
-    return {"PreToolUse": [HookMatcher(hooks=[_on_tool_call])]}
+
+    async def _on_tool_done(input_data: PostToolUseHookInput, tool_use_id: str | None, context) -> SyncHookJSONOutput:
+        tool_use_id_val = input_data["tool_use_id"]
+        starts = _pending_tool_starts.get(chat_id, {})
+        start = starts.pop(tool_use_id_val, None)
+        if start is not None:
+            elapsed = round(_time.monotonic() - start, 2)
+            bare_name = _strip_tool_prefix(input_data["tool_name"])
+            _tool_timings.setdefault(chat_id, []).append((bare_name, elapsed))
+        return SyncHookJSONOutput()
+
+    return {
+        "PreToolUse": [HookMatcher(hooks=[_on_tool_call])],
+        "PostToolUse": [HookMatcher(hooks=[_on_tool_done])],
+    }
 
 # ---------------------------------------------------------------------------
 # Native subagents
@@ -481,6 +509,8 @@ async def run(chat_id: str, user_message: str) -> str:
         timestamped = _timestamp_message(user_message)
         session_log(chat_id, "user", user_message)
         _tools_used_this_turn.pop(chat_id, None)
+        _tool_timings.pop(chat_id, None)
+        _pending_tool_starts.pop(chat_id, None)
 
         reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, timestamped, options)))
 
@@ -507,6 +537,8 @@ async def run_streaming(chat_id: str, user_message: str):
         options = _make_options(chat_id, resume=session_id)
         timestamped = _timestamp_message(user_message)
         session_log(chat_id, "user", user_message)
+        _tool_timings.pop(chat_id, None)
+        _pending_tool_starts.pop(chat_id, None)
         cfg = Config.load()
         initial_timeout = cfg.get("agent_initial_timeout")
         stall = cfg.get("agent_stall_timeout")

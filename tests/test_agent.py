@@ -240,6 +240,28 @@ class TestToolActivity:
         _tool_start_time.pop("test-chat", None)
 
 
+class TestToolTimings:
+    def test_get_tool_timings_empty_by_default(self):
+        from indieclaw.agent import get_tool_timings
+        assert get_tool_timings("no-such-chat") == []
+
+    def test_tool_timings_recorded(self):
+        from indieclaw.agent import _tool_timings, get_tool_timings
+        _tool_timings["timing-test"] = [("Bash", 2.3), ("WebSearch", 1.1)]
+        result = get_tool_timings("timing-test")
+        assert len(result) == 2
+        assert result[0] == ("Bash", 2.3)
+        assert result[1] == ("WebSearch", 1.1)
+        _tool_timings.pop("timing-test", None)
+
+    def test_strip_mcp_prefix(self):
+        from indieclaw.agent import _strip_tool_prefix
+        assert _strip_tool_prefix("mcp__indieclaw__telegram_send") == "telegram_send"
+        assert _strip_tool_prefix("mcp__dynamic__my_tool") == "my_tool"
+        assert _strip_tool_prefix("Bash") == "Bash"
+        assert _strip_tool_prefix("Read") == "Read"
+
+
 def test_initial_timeout_config_default():
     from indieclaw.config import Config
     cfg = Config()
