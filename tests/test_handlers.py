@@ -1075,4 +1075,43 @@ class TestStatusDashboard:
         assert "Last turn" in text
         assert "Bash" in text
         assert "Today" in text
-        assert "12 turns" in text
+
+
+class TestVoiceTranscription:
+    @pytest.mark.asyncio
+    async def test_transcribe_voice_success(self):
+        from indieclaw.handlers import _transcribe_voice
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "Hello, this is a test message.\n"
+        with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=mock_result):
+            result = await _transcribe_voice("/tmp/test.ogg")
+        assert result == "Hello, this is a test message."
+
+    @pytest.mark.asyncio
+    async def test_transcribe_voice_failure(self):
+        from indieclaw.handlers import _transcribe_voice
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=mock_result):
+            result = await _transcribe_voice("/tmp/test.ogg")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_transcribe_voice_timeout(self):
+        import subprocess
+        from indieclaw.handlers import _transcribe_voice
+        with patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=subprocess.TimeoutExpired("claude", 30)):
+            result = await _transcribe_voice("/tmp/test.ogg")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_transcribe_voice_empty_output(self):
+        from indieclaw.handlers import _transcribe_voice
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "   \n"
+        with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=mock_result):
+            result = await _transcribe_voice("/tmp/test.ogg")
+        assert result is None

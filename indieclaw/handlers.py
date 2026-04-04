@@ -652,6 +652,22 @@ async def on_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _run_agent_and_reply(context.bot, None, chat_id, f"[User reacted to a previous message with: {emoji_str}]")
 
 
+async def _transcribe_voice(path: str) -> str | None:
+    """Transcribe a voice file via claude CLI. Returns transcript or None on failure."""
+    import subprocess as _sp
+    try:
+        result = await asyncio.to_thread(
+            _sp.run,
+            ["claude", "-p", "Transcribe this audio exactly. Output only the transcript, nothing else.", "--file", path],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, _sp.TimeoutExpired) as e:
+        logger.warning("Voice transcription failed: {}", e)
+    return None
+
+
 @require_allowed
 async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice messages — download, tell the agent about it."""
@@ -666,10 +682,17 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Error downloading voice: {}", e)
         await update.message.reply_text(_classify_error(e))
         return
-    agent_msg = (
-        f"[chat_id={chat_id} message_id={update.message.message_id}]\n"
-        f"[User sent a voice message ({voice.duration}s). Saved to: {dest}]\n\n{caption}"
-    )
+    transcript = await _transcribe_voice(str(dest))
+    if transcript:
+        agent_msg = (
+            f"[chat_id={chat_id} message_id={update.message.message_id}]\n"
+            f"[User sent a voice message ({voice.duration}s): {transcript}]\n\n{caption}"
+        )
+    else:
+        agent_msg = (
+            f"[chat_id={chat_id} message_id={update.message.message_id}]\n"
+            f"[User sent a voice message ({voice.duration}s). Saved to: {dest}]\n\n{caption}"
+        )
     await _run_agent_and_reply(context.bot, update.message, chat_id, agent_msg)
 
 
