@@ -457,6 +457,59 @@ def _record_result(chat_id: str, msg: ResultMessage) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _load_recent_context(chat_id: str, max_chars: int = 2000) -> str:
+    """Load recent exchanges for this chat from session logs."""
+    import json
+    from datetime import timedelta
+
+    sessions_dir = workspace.HOME / "sessions"
+    if not sessions_dir.exists():
+        return ""
+
+    now = datetime.now(timezone.utc)
+    files = []
+    for days_ago in range(2):  # today + yesterday
+        date_str = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        f = sessions_dir / f"{date_str}.jsonl"
+        if f.exists():
+            files.append(f)
+
+    entries = []
+    for f in files:
+        try:
+            for line in f.read_text().splitlines():
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if entry.get("chat_id") != chat_id:
+                    continue
+                if entry.get("role") not in ("user", "assistant"):
+                    continue
+                entries.append(entry)
+        except Exception:
+            continue
+
+    if not entries:
+        return ""
+
+    # Take last 10 entries (5 exchanges)
+    recent = entries[-10:]
+    parts = []
+    for entry in recent:
+        role = entry["role"].capitalize()
+        content = entry.get("content", "")
+        if isinstance(content, dict):
+            continue
+        # Truncate individual messages
+        text = content[:300] + "..." if len(content) > 300 else content
+        parts.append(f"{role}: {text}")
+
+    result = "\n".join(parts)
+    if len(result) > max_chars:
+        result = result[-max_chars:]
+    return result
+
+
 def _collect_text(msg: AssistantMessage) -> list[str]:
     return [block.text for block in msg.content if isinstance(block, TextBlock)]
 
@@ -513,11 +566,22 @@ async def run(chat_id: str, user_message: str) -> str:
     async with lock:
         session_id = _session_ids.get(chat_id)
         options = _make_options(chat_id, resume=session_id)
-        timestamped = _timestamp_message(user_message)
         session_log(chat_id, "user", user_message)
         _tools_used_this_turn.pop(chat_id, None)
         _tool_timings.pop(chat_id, None)
         _pending_tool_starts.pop(chat_id, None)
+
+        # Inject recent context on first message of a new session
+        agent_msg = user_message
+        if not session_id:
+            context = _load_recent_context(chat_id)
+            if context:
+                agent_msg = (
+                    f"[Recent context from past conversations:]\n{context}\n\n"
+                    f"{user_message}"
+                )
+
+        timestamped = _timestamp_message(agent_msg)
 
         reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, timestamped, options)))
 
@@ -542,10 +606,21 @@ async def run_streaming(chat_id: str, user_message: str):
     async with lock:
         session_id = _session_ids.get(chat_id)
         options = _make_options(chat_id, resume=session_id)
-        timestamped = _timestamp_message(user_message)
         session_log(chat_id, "user", user_message)
         _tool_timings.pop(chat_id, None)
         _pending_tool_starts.pop(chat_id, None)
+
+        # Inject recent context on first message of a new session
+        agent_msg = user_message
+        if not session_id:
+            context = _load_recent_context(chat_id)
+            if context:
+                agent_msg = (
+                    f"[Recent context from past conversations:]\n{context}\n\n"
+                    f"{user_message}"
+                )
+
+        timestamped = _timestamp_message(agent_msg)
         cfg = Config.load()
         initial_timeout = cfg.get("agent_initial_timeout")
         stall = cfg.get("agent_stall_timeout")
