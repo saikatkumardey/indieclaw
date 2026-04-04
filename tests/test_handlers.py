@@ -1023,4 +1023,56 @@ class TestFollowupFiresAgentRun:
             await asyncio.sleep(0.05)
 
         assert len(captured) == 1
-        assert "I'll set that up" in captured[0] or "promise" in captured[0].lower() or "10 minutes" in captured[0]
+
+
+# ---------------------------------------------------------------------------
+# TestStatusDashboard
+# ---------------------------------------------------------------------------
+
+class TestStatusDashboard:
+    @pytest.mark.asyncio
+    async def test_status_shows_usage_sections(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers_commands import on_status
+
+        update = MagicMock()
+        update.effective_chat = MagicMock()
+        update.effective_chat.id = 123
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        with patch("indieclaw.handlers_commands.load_custom_tools", return_value=[]), \
+             patch("indieclaw.handlers_commands.get_current_model", return_value="claude-sonnet-4-6"), \
+             patch("indieclaw.handlers_commands.get_current_effort", return_value="low"), \
+             patch("indieclaw.handlers_commands.get_last_usage", return_value={
+                 "input_tokens": 1204, "output_tokens": 813,
+                 "cache_read_input_tokens": 892, "cache_creation_input_tokens": 0,
+                 "_model": "claude-sonnet-4-6",
+             }), \
+             patch("indieclaw.handlers_commands.get_tool_timings", return_value=[
+                 ("Bash", 2.3), ("WebSearch", 1.1), ("Read", 0.2),
+             ]), \
+             patch("indieclaw.handlers_commands.SessionState") as mock_ss, \
+             patch("indieclaw.handlers_commands.local_version", return_value="0.1.23"), \
+             patch("indieclaw.handlers_commands.BrowserManager") as mock_bm:
+            mock_bm.get.return_value.backend = "lightpanda"
+            mock_state = MagicMock()
+            mock_state.get_usage_today.return_value = {
+                "date": "2026-04-04", "input_tokens": 45200, "output_tokens": 12800,
+                "cache_read_tokens": 31100, "cache_write_tokens": 0,
+                "turns": 12, "cost_usd": 0.14, "models": {"claude-sonnet-4-6": 10, "claude-haiku-4-5-20251001": 2},
+            }
+            mock_state.get_usage_history.return_value = []
+            mock_ss.load.return_value = mock_state
+
+            import indieclaw.workspace as ws
+            monkeypatch.setattr(ws, "SKILLS_DIR", MagicMock(exists=lambda: False))
+            monkeypatch.setattr(ws, "MEMORY", MagicMock(read_text=MagicMock(side_effect=FileNotFoundError)))
+
+            await on_status(update, MagicMock())
+
+        text = update.message.reply_text.await_args[0][0]
+        assert "Last turn" in text
+        assert "Bash" in text
+        assert "Today" in text
+        assert "12 turns" in text

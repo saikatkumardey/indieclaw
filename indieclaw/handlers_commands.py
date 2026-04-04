@@ -17,29 +17,102 @@ from .agent import (
     get_current_model,
     get_last_usage,
     get_streaming,
+    get_tool_timings,
     set_effort,
     set_model,
     set_streaming,
 )
 from .auth import is_allowed, require_allowed
+from .browser import BrowserManager
 from .session_state import SessionState
 from .tool_loader import load_custom_tools
 from .tools_sdk import CUSTOM_TOOLS
 from .version import check_remote_version as _check_remote_version
 from .version import get_update_summary as _get_update_summary
+from .version import local_version
 from .version import local_version as _local_version
 
 
-def _last_turn_stats(chat_id: str) -> str:
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return f"{n:,}"
+
+
+def _last_turn_section(chat_id: str) -> str:
     usage = get_last_usage(chat_id)
     if not usage:
-        return ""
+        return "\n\n<b>\U0001f4ca Last turn</b>\n  No recent activity."
+
+    timings = get_tool_timings(chat_id)
+    tool_str = ", ".join(f"{name} ({elapsed:.1f}s)" for name, elapsed in timings) if timings else "none"
+
     inp = usage.get("input_tokens", 0)
     out = usage.get("output_tokens", 0)
     cache_read = usage.get("cache_read_input_tokens", 0)
-    cache_write = usage.get("cache_creation_input_tokens", 0)
-    cache_str = f" | cache down {cache_read} up {cache_write}" if (cache_read or cache_write) else ""
-    return f"\nLast turn: {inp}in/{out}out{cache_str}"
+    cache_pct = f" ({_fmt_tokens(cache_read)} cached)" if cache_read else ""
+
+    model = usage.get("_model", "")
+    from .session_state import estimate_cost
+    cost = estimate_cost(model, inp, out, cache_read, usage.get("cache_creation_input_tokens", 0))
+
+    return (
+        f"\n\n<b>\U0001f4ca Last turn</b>"
+        f"\n  Tools: {tool_str}"
+        f"\n  Tokens: {_fmt_tokens(inp)} in{cache_pct} / {_fmt_tokens(out)} out"
+        f"\n  Cost: ~${cost:.3f}"
+    )
+
+
+def _today_section() -> str:
+    usage = SessionState.load().get_usage_today()
+    turns = usage.get("turns", 0)
+    if turns == 0:
+        return ""
+
+    inp = usage.get("input_tokens", 0)
+    out = usage.get("output_tokens", 0)
+    cache_read = usage.get("cache_read_tokens", 0)
+    cache_pct = f" ({_fmt_tokens(cache_read)} cached, {cache_read * 100 // inp}%)" if inp and cache_read else ""
+    cost = usage.get("cost_usd", 0.0)
+
+    models = usage.get("models", {})
+    model_parts = []
+    for m, count in sorted(models.items(), key=lambda x: -x[1]):
+        short = m.split("-")[1] if "-" in m else m
+        model_parts.append(f"{short} \u00d7{count}")
+    model_str = ", ".join(model_parts) if model_parts else ""
+
+    lines = [
+        f"\n\n<b>\U0001f4ca Today</b> ({turns} turns)",
+        f"\n  Tokens: {_fmt_tokens(inp)} in{cache_pct} / {_fmt_tokens(out)} out",
+        f"\n  Cost: ~${cost:.2f}",
+    ]
+    if model_str:
+        lines.append(f"\n  Models: {model_str}")
+    return "".join(lines)
+
+
+def _history_section() -> str:
+    history = SessionState.load().get_usage_history()
+    if not history:
+        return ""
+
+    total_turns = sum(h.get("turns", 0) for h in history)
+    total_cost = sum(h.get("cost_usd", 0.0) for h in history)
+    total_cache_read = sum(h.get("cache_read_tokens", 0) for h in history)
+    total_input = sum(h.get("input_tokens", 0) for h in history)
+
+    avg_cost = total_cost / total_turns if total_turns else 0
+    cache_pct = total_cache_read * 100 // total_input if total_input else 0
+
+    return (
+        f"\n\n<b>\U0001f4ca Last {len(history)} days</b>"
+        f"\n  Turns: {total_turns} | Cost: ~${total_cost:.2f}"
+        f"\n  Avg: ${avg_cost:.3f}/turn | Cache: {cache_pct}%"
+    )
 
 
 @require_allowed
@@ -79,22 +152,19 @@ async def on_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     except FileNotFoundError:
         memory_lines = 0
     dynamic_names = ", ".join(t.name for t in dynamic_tools) if dynamic_tools else "none"
-    cost_line = _last_turn_stats(str(update.effective_chat.id))
-    usage_today = SessionState.load().get_usage_today()
-    today_line = f"\nToday: {usage_today['input_tokens']}in/{usage_today['output_tokens']}out | {usage_today['turns']} turns"
-    from .browser import BrowserManager
-    from .version import local_version
+
+    chat_id = str(update.effective_chat.id)
+
     text = (
-        f"<b>IndieClaw</b> v{local_version()}\n\n"
-        f"<b>Model:</b> <code>{get_current_model()}</code>\n"
-        f"<b>Effort:</b> {get_current_effort()}\n"
+        f"<b>IndieClaw</b> v{local_version()}\n"
+        f"<b>Model:</b> <code>{get_current_model()}</code> | <b>Effort:</b> {get_current_effort()}\n"
         f"<b>Browser:</b> {BrowserManager.get().backend}\n\n"
         f"<b>Tools:</b> 5 built-in + {len(CUSTOM_TOOLS) + 2} SDK + {len(dynamic_tools)} dynamic"
         f"{(' (' + dynamic_names + ')') if dynamic_tools else ''}\n"
-        f"<b>Skills:</b> {skill_count}\n"
-        f"<b>Memory:</b> {memory_lines} lines"
-        f"{cost_line}"
-        f"{today_line}"
+        f"<b>Skills:</b> {skill_count} | <b>Memory:</b> {memory_lines} lines"
+        f"{_last_turn_section(chat_id)}"
+        f"{_today_section()}"
+        f"{_history_section()}"
     )
     try:
         await update.message.reply_text(text, parse_mode="HTML")
