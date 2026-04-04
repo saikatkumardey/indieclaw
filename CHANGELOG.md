@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.26] - 2026-04-04
+
+- feat: transcribe voice messages via claude CLI before passing to agent
+
+
 ## [0.1.25] - 2026-04-04
 
 - style: reformat import line
