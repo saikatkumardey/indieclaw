@@ -172,10 +172,24 @@ def _format_activity(label: str, elapsed: float) -> str:
 
 
 _ERROR_MESSAGES = {
-    asyncio.TimeoutError: "Timed out. Try again, or /reset if it keeps happening.",
+    asyncio.TimeoutError: "Timed out — no response from Claude. Try again, or /reset if it keeps happening.",
     PermissionError: "Permission denied. Try /restart.",
     ConnectionError: "Connection error. Check your network and try again.",
+    OSError: "System error. Try again, or /restart if it persists.",
 }
+
+_ERROR_PATTERNS: list[tuple[str, str]] = [
+    ("rate limit", "Rate limited — Claude API is busy. Wait a minute and try again."),
+    ("429", "Rate limited — too many requests. Wait a minute and try again."),
+    ("overloaded", "Claude is overloaded. Try again in a few minutes, or switch to a faster model with /model."),
+    ("529", "Claude is overloaded. Try again in a few minutes."),
+    ("401", "Authentication failed. Your API key or login may have expired. Check `indieclaw setup-token`."),
+    ("authentication", "Authentication failed. Run `indieclaw setup-token` to refresh credentials."),
+    ("403", "Access denied. Your account may not have access to this model. Try /model to switch."),
+    ("insufficient_quota", "API quota exceeded. Check your Anthropic billing."),
+    ("context_length", "Message too long for the model. Try /reset to start fresh, or send a shorter message."),
+    ("invalid_api_key", "Invalid API key. Run `indieclaw setup-token` to fix."),
+]
 
 
 async def _notify_error(bot, message, chat_id: str, e: Exception) -> None:
@@ -191,11 +205,18 @@ async def _notify_error(bot, message, chat_id: str, e: Exception) -> None:
 
 
 def _classify_error(e: Exception) -> str:
+    # Check exception class hierarchy first
     for cls in type(e).__mro__:
         if cls in _ERROR_MESSAGES:
             return _ERROR_MESSAGES[cls]
+    # Check subprocess.TimeoutExpired by name (avoids import)
     if type(e).__name__ == "TimeoutExpired":
-        return "Timed out. Try again, or /reset if it keeps happening."
+        return "Timed out — command took too long. Try again, or /reset if it keeps happening."
+    # Check error string for known patterns
+    err_str = str(e).lower()
+    for pattern, message in _ERROR_PATTERNS:
+        if pattern in err_str:
+            return message
     return "Something went wrong. Try again, or /reset if it persists."
 
 

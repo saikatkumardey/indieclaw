@@ -1101,6 +1101,7 @@ class TestVoiceTranscription:
     @pytest.mark.asyncio
     async def test_transcribe_voice_timeout(self):
         import subprocess
+
         from indieclaw.handlers import _transcribe_voice
         with patch("asyncio.to_thread", new_callable=AsyncMock, side_effect=subprocess.TimeoutExpired("claude", 30)):
             result = await _transcribe_voice("/tmp/test.ogg")
@@ -1115,3 +1116,61 @@ class TestVoiceTranscription:
         with patch("asyncio.to_thread", new_callable=AsyncMock, return_value=mock_result):
             result = await _transcribe_voice("/tmp/test.ogg")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _classify_error
+# ---------------------------------------------------------------------------
+
+class TestClassifyError:
+    def test_timeout_error(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(TimeoutError())
+        assert "Timed out" in result
+
+    def test_connection_error(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(ConnectionError("refused"))
+        assert "network" in result.lower()
+
+    def test_rate_limit_pattern(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(Exception("Error: rate limit exceeded"))
+        assert "Rate limited" in result
+
+    def test_overloaded_pattern(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(Exception("API overloaded, try again"))
+        assert "overloaded" in result.lower()
+
+    def test_auth_pattern(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(Exception("401 Unauthorized"))
+        assert "Authentication" in result or "expired" in result
+
+    def test_quota_pattern(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(Exception("insufficient_quota"))
+        assert "quota" in result.lower()
+
+    def test_context_length_pattern(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(Exception("context_length exceeded"))
+        assert "too long" in result.lower() or "reset" in result.lower()
+
+    def test_unknown_error_generic(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(ValueError("something bizarre"))
+        assert "Something went wrong" in result
+
+    def test_os_error(self):
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(FileNotFoundError("no such file"))
+        assert "System error" in result
+
+    def test_subprocess_timeout_by_name(self):
+        import subprocess
+
+        from indieclaw.handlers import _classify_error
+        result = _classify_error(subprocess.TimeoutExpired("cmd", 30))
+        assert "Timed out" in result
