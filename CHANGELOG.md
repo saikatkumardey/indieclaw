@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.9] - 2026-04-04
+
+- fix: suppress duplicate reply when telegram_send already used in turn
+
+
 ## [0.1.8] - 2026-04-03
 
 - fix: filter 'No response requested.' as tool noise
