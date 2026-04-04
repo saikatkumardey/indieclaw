@@ -2,6 +2,16 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.23] - 2026-04-04
+
+- fix: 12 silent bugs — daemon safety, telegram_send suppression, test hangs
+- Suppress '(No message — standing by.)' idle message from Telegram replies
+- feat: sync_commands tool to re-register Telegram / menu on demand
+- fix: add /stop to /help text
+- feat: auto follow-up when Donna makes a promise
+- Add RTK rewrite hook to Donna's Bash tool calls
+
+
 ## [0.1.17] - 2026-04-04
 
 - fix: patch rtk hook script to include ~/.local/bin in PATH
