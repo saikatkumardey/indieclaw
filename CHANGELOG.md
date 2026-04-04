@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.10] - 2026-04-04
+
+- fix: replace send_message_draft with edit-based preview — no replay animation
+
+
 ## [0.1.9] - 2026-04-04
 
 - fix: suppress duplicate reply when telegram_send already used in turn
