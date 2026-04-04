@@ -840,6 +840,28 @@ class TestToolNoiseReply:
         # Should have sent SOME reply to the user
         assert msg.reply_text.await_count > 0 or bot.send_message.await_count > 0
 
+    @pytest.mark.asyncio
+    async def test_standing_by_suppressed(self, monkeypatch):
+        """'(No message — standing by.)' should be suppressed, not forwarded."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import _run_agent_and_reply
+
+        bot = MagicMock()
+        bot.send_chat_action = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        msg = MagicMock()
+        msg.reply_text = AsyncMock()
+
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value="(No message \u2014 standing by.)"), \
+             patch("indieclaw.handlers.get_streaming", return_value=False), \
+             patch("indieclaw.handlers.get_tools_used", return_value=set()):
+            await _run_agent_and_reply(bot, msg, "123", "ping")
+
+        # Should NOT forward the standing-by phrase verbatim
+        for call in msg.reply_text.await_args_list:
+            assert "standing by" not in call.args[0].lower()
+
 
 # ---------------------------------------------------------------------------
 # Promise follow-up

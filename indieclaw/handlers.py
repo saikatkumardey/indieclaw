@@ -142,6 +142,7 @@ _TOOL_NOISE_PHRASES = {
     "No response requested.",
     "No response needed.",
     "No reply needed.",
+    "(No message — standing by.)",
 }
 
 def _is_tool_noise(reply: str, chat_id: str = "") -> bool:
