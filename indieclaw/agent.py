@@ -324,6 +324,17 @@ def _timestamp_message(user_message: str) -> str:
     return f"[Current time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}]\n\n{user_message}"
 
 
+_HUMAN_TURN_RE = _re.compile(r"\nHuman:\s*\[Current time:", _re.IGNORECASE)
+
+
+def _strip_hallucinated_turns(text: str) -> str:
+    """Remove any model-generated fake human turns from the response."""
+    m = _HUMAN_TURN_RE.search(text)
+    if m:
+        return text[:m.start()].rstrip()
+    return text
+
+
 def _extract_stream_delta(msg: StreamEvent) -> str | None:
     if msg.parent_tool_use_id is not None:
         return None
@@ -415,7 +426,7 @@ async def run(chat_id: str, user_message: str) -> str:
         session_log(chat_id, "user", user_message)
         _tools_used_this_turn.pop(chat_id, None)
 
-        reply = await _run_once(chat_id, timestamped, options)
+        reply = _strip_hallucinated_turns(await _run_once(chat_id, timestamped, options))
 
         # Lazy ignorance check: retry once with a nudge if agent claimed
         # ignorance without checking session logs or memory
@@ -425,7 +436,7 @@ async def run(chat_id: str, user_message: str) -> str:
             _tools_used_this_turn.pop(chat_id, None)
             nudge = "[System: You claimed ignorance without checking. Search session logs and read MEMORY.md before responding.]"
             options = _make_options(chat_id, resume=_session_ids.get(chat_id))
-            reply = await _run_once(chat_id, nudge, options)
+            reply = _strip_hallucinated_turns(await _run_once(chat_id, nudge, options))
 
     session_log(chat_id, "assistant", reply)
     clear_tool_activity(chat_id)
@@ -467,7 +478,7 @@ async def run_streaming(chat_id: str, user_message: str):
                     elif isinstance(msg, ResultMessage):
                         _handle_result(chat_id, msg)
 
-            reply = "\n".join(parts) or "(no response)"
+            reply = _strip_hallucinated_turns("\n".join(parts) or "(no response)")
         except TimeoutError:
             phase = "initial" if first_event else "inter-event"
             timeout_val = initial_timeout if first_event else stall
