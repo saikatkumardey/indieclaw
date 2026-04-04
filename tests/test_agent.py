@@ -437,3 +437,64 @@ class TestLazyIgnoranceCheck:
             assert "don't know" in result.lower()
             # query called at most 2 times (original + 1 retry)
             assert mock_client.query.await_count <= 2
+
+
+class TestLoadRecentContext:
+    def test_returns_empty_when_no_sessions(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        from indieclaw.agent import _load_recent_context
+        assert _load_recent_context("test-chat") == ""
+
+    def test_loads_recent_entries_for_chat(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        import json
+        from datetime import datetime, timezone
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir(exist_ok=True)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entries = [
+            {"ts": "2026-04-04T10:00:00", "chat_id": "chat1", "role": "user", "content": "Hello"},
+            {"ts": "2026-04-04T10:00:01", "chat_id": "chat1", "role": "assistant", "content": "Hi there!"},
+            {"ts": "2026-04-04T10:01:00", "chat_id": "chat2", "role": "user", "content": "Other chat"},
+            {"ts": "2026-04-04T10:02:00", "chat_id": "chat1", "role": "user", "content": "How are you?"},
+        ]
+        (sessions_dir / f"{today}.jsonl").write_text("\n".join(json.dumps(e) for e in entries))
+        from indieclaw.agent import _load_recent_context
+        result = _load_recent_context("chat1")
+        assert "Hello" in result
+        assert "Hi there" in result
+        assert "How are you" in result
+        assert "Other chat" not in result
+
+    def test_truncates_to_max_chars(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        import json
+        from datetime import datetime, timezone
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir(exist_ok=True)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entries = [
+            {"ts": "2026-04-04T10:00:00", "chat_id": "chat1", "role": "user", "content": "A" * 500}
+            for _ in range(20)
+        ]
+        (sessions_dir / f"{today}.jsonl").write_text("\n".join(json.dumps(e) for e in entries))
+        from indieclaw.agent import _load_recent_context
+        result = _load_recent_context("chat1", max_chars=500)
+        assert len(result) <= 500
+
+    def test_skips_non_text_content(self, tmp_path, monkeypatch):
+        _patch_workspace(tmp_path, monkeypatch)
+        import json
+        from datetime import datetime, timezone
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir(exist_ok=True)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        entries = [
+            {"ts": "2026-04-04T10:00:00", "chat_id": "chat1", "role": "result", "content": {"turns": 1}},
+            {"ts": "2026-04-04T10:00:01", "chat_id": "chat1", "role": "user", "content": "Real message"},
+        ]
+        (sessions_dir / f"{today}.jsonl").write_text("\n".join(json.dumps(e) for e in entries))
+        from indieclaw.agent import _load_recent_context
+        result = _load_recent_context("chat1")
+        assert "Real message" in result
+        assert "turns" not in result
