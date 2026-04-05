@@ -1174,3 +1174,49 @@ class TestClassifyError:
         from indieclaw.handlers import _classify_error
         result = _classify_error(subprocess.TimeoutExpired("cmd", 30))
         assert "Timed out" in result
+
+
+class TestThreadsCommand:
+    @pytest.mark.asyncio
+    async def test_threads_shows_open_threads(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers_commands import on_threads
+
+        update = MagicMock()
+        update.effective_chat = MagicMock()
+        update.effective_chat.id = 123
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        mock_threads = [
+            {"id": "test-thread", "priority": "high", "summary": "Check deployment", "created": "2026-04-04", "expires": "2026-04-06", "action": "act"},
+        ]
+
+        with patch("indieclaw.handlers_commands.Config") as mock_cfg, \
+             patch("indieclaw.handlers_commands.load_threads", return_value=mock_threads):
+            mock_cfg.load.return_value.get = lambda k, d=None: {"subconscious_enabled": True, "subconscious_interval_hours": 2}.get(k, d)
+            await on_threads(update, MagicMock())
+
+        text = update.message.reply_text.await_args[0][0]
+        assert "Subconscious" in text
+        assert "test-thread" in text
+        assert "Check deployment" in text
+        assert "high" in text
+
+    @pytest.mark.asyncio
+    async def test_threads_disabled(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers_commands import on_threads
+
+        update = MagicMock()
+        update.effective_chat = MagicMock()
+        update.effective_chat.id = 123
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+
+        with patch("indieclaw.handlers_commands.Config") as mock_cfg:
+            mock_cfg.load.return_value.get = lambda k, d=None: {"subconscious_enabled": False}.get(k, d)
+            await on_threads(update, MagicMock())
+
+        text = update.message.reply_text.await_args[0][0]
+        assert "disabled" in text

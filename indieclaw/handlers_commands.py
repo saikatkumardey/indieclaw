@@ -24,7 +24,9 @@ from .agent import (
 )
 from .auth import is_allowed, require_allowed
 from .browser import BrowserManager
+from .config import Config
 from .session_state import SessionState
+from .subconscious import load_threads
 from .tool_loader import load_custom_tools
 from .tools_sdk import CUSTOM_TOOLS
 from .version import check_remote_version as _check_remote_version
@@ -130,7 +132,8 @@ async def on_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "<b>Config</b>\n"
         "/model \u2014 switch Claude model (opus/sonnet/haiku)\n"
         "/effort \u2014 thinking effort level\n"
-        "/status \u2014 current config and stats\n\n"
+        "/status \u2014 current config and stats\n"
+        "/threads \u2014 show subconscious threads\n\n"
         "<b>System</b>\n"
         "/crons \u2014 scheduled jobs\n"
         "/restart \u2014 restart the bot\n"
@@ -348,3 +351,46 @@ async def on_streaming(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Streaming ON \u2014 responses appear as they're generated.")
     else:
         await update.message.reply_text("Streaming OFF \u2014 responses sent when complete.")
+
+
+@require_allowed
+async def on_threads(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    cfg = Config.load()
+    enabled = cfg.get("subconscious_enabled", True)
+    interval = cfg.get("subconscious_interval_hours", 2)
+
+    if not enabled:
+        await update.message.reply_text("\U0001f9e0 Subconscious \u2014 disabled")
+        return
+
+    threads = load_threads()
+
+    header = f"\U0001f9e0 <b>Subconscious</b> \u2014 enabled (every {interval}h)\n"
+
+    if not threads:
+        text = header + "\nNo open threads."
+        try:
+            await update.message.reply_text(text, parse_mode="HTML")
+        except Exception:
+            await update.message.reply_text(text)
+        return
+
+    lines = [header, f"\n\U0001f4cb <b>Open threads</b> ({len(threads)})\n"]
+    for t in threads:
+        priority = t.get("priority", "?")
+        tid = t.get("id", "?")
+        summary = _html.escape(t.get("summary", "")[:80])
+        created = t.get("created", "")[:10]
+        expires = t.get("expires", "")[:10]
+        date_info = f"Created: {created}" if created else ""
+        if expires:
+            date_info += f" | Expires: {expires}" if date_info else f"Expires: {expires}"
+        lines.append(f"\u2022 [{priority}] <b>{_html.escape(tid)}</b> \u2014 {summary}")
+        if date_info:
+            lines.append(f"  {date_info}")
+
+    text = "\n".join(lines)
+    try:
+        await update.message.reply_text(text, parse_mode="HTML")
+    except Exception:
+        await update.message.reply_text(text)
