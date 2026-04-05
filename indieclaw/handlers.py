@@ -158,12 +158,14 @@ def _used_telegram_send(chat_id: str) -> bool:
     return any(t.endswith("telegram_send") for t in get_tools_used(chat_id))
 
 
-def _is_tool_noise(reply: str, chat_id: str = "") -> bool:
+def _is_tool_noise(reply: str) -> bool:
     """Return True if the reply is a default tool-only response with no real content."""
-    if reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:"):
-        return True
-    # Suppress final text reply if Donna already sent a message via telegram_send
-    return bool(chat_id and _used_telegram_send(chat_id))
+    return reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:")
+
+
+def _should_suppress_reply(reply: str, chat_id: str) -> bool:
+    """Return True if the reply should not be sent to the user."""
+    return not reply or _is_tool_noise(reply) or _used_telegram_send(chat_id)
 
 
 def _format_activity(label: str, elapsed: float) -> str:
@@ -340,7 +342,7 @@ async def _run_agent_and_reply_streaming(
                 accumulated.append(data)
             elif event_type == "done":
                 done_event.set()
-                if not data or _is_tool_noise(data, chat_id):
+                if _should_suppress_reply(data, chat_id):
                     return
                 await _send_reply(bot, message, chat_id, data)
                 _maybe_schedule_followup(bot, chat_id, data)
@@ -393,9 +395,13 @@ async def _run_agent_and_reply(
         try:
             async with _TypingLoop(bot, chat_id):
                 reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
-            if not reply or _is_tool_noise(reply, chat_id):
-                if not _used_telegram_send(chat_id):
+            sent_via_tool = _used_telegram_send(chat_id)
+            if not reply or _is_tool_noise(reply):
+                if not sent_via_tool:
                     await _send_reply(bot, message, chat_id, "\u2705 Done.")
+                return
+            # Suppress text reply when telegram_send already delivered the message
+            if sent_via_tool:
                 return
             await _send_reply(bot, message, chat_id, reply)
             _maybe_schedule_followup(bot, chat_id, reply)

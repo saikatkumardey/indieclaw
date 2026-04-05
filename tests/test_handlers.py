@@ -885,6 +885,29 @@ class TestToolNoiseReply:
         for call in msg.reply_text.await_args_list:
             assert "Done" not in call.args[0], f"Unexpected 'Done.' reply: {call.args[0]}"
 
+    @pytest.mark.asyncio
+    async def test_telegram_send_suppresses_substantive_reply(self, monkeypatch):
+        """When agent used telegram_send AND returns a substantive reply, suppress the reply."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        from indieclaw.handlers import _run_agent_and_reply
+
+        bot = MagicMock()
+        bot.send_chat_action = AsyncMock()
+        bot.send_message = AsyncMock()
+
+        msg = MagicMock()
+        msg.reply_text = AsyncMock()
+
+        # Simulate agent using telegram_send AND returning a real summary reply
+        substantive_reply = "Done. Added ML Wiki in two places:\n1. Top nav bar\n2. Homepage"
+        with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value=substantive_reply), \
+             patch("indieclaw.handlers.get_streaming", return_value=False), \
+             patch("indieclaw.handlers.get_tools_used", return_value={"mcp__indieclaw__telegram_send"}):
+            await _run_agent_and_reply(bot, msg, "123", "add link to nav")
+
+        # Should NOT have sent the substantive reply — telegram_send already delivered it
+        msg.reply_text.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # Promise follow-up

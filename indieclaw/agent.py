@@ -607,6 +607,7 @@ async def run_streaming(chat_id: str, user_message: str):
         session_id = _session_ids.get(chat_id)
         options = _make_options(chat_id, resume=session_id)
         session_log(chat_id, "user", user_message)
+        _tools_used_this_turn.pop(chat_id, None)
         _tool_timings.pop(chat_id, None)
         _pending_tool_starts.pop(chat_id, None)
 
