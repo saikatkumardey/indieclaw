@@ -531,6 +531,8 @@ _BOT_COMMANDS = [
     ("effort",    "Set thinking effort level"),
     ("cc",        "Start a live Claude Code session"),
     ("streaming", "Toggle response streaming"),
+    ("tasks",     "List open tasks"),
+    ("task",      "Add/complete/drop tasks"),
 ]
 
 
