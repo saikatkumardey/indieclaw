@@ -334,6 +334,7 @@ def _register_handlers(bot) -> list:
         ("efforts", h.on_effort, None),
         ("cc",      h.on_cc,      "Start a live Claude Code session"),
         ("streaming", h.on_streaming, "Toggle response streaming"),
+        ("threads",   h.on_threads,   "Show subconscious threads"),
     ]
     for name, handler, _ in commands:
         bot.add_handler(CommandHandler(name, handler))
