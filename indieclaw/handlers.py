@@ -34,7 +34,8 @@ from .handlers_commands import (  # noqa: F401
     on_restart,
     on_status,
     on_streaming,
-    on_threads,
+    on_task,
+    on_tasks,
     on_update,
 )
 from .tools import MAX_TG_MSG

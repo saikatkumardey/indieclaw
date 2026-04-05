@@ -101,6 +101,28 @@ class TestAutoExpire:
         assert threads[0]["id"] == "active"
 
 
+class TestQuickAdd:
+    def test_creates_task_with_slug(self, tmp_path, monkeypatch):
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "SUBCONSCIOUS", tmp_path / "subconscious.yaml")
+        (tmp_path / "subconscious.yaml").write_text("threads: []\n")
+        from indieclaw.subconscious import load_threads, quick_add
+        task_id = quick_add("Deploy blog to production")
+        assert task_id == "deploy-blog-to-production"
+        threads = load_threads()
+        assert len(threads) == 1
+        assert threads[0]["priority"] == "medium"
+        assert threads[0]["summary"] == "Deploy blog to production"
+
+    def test_slug_truncated_to_40_chars(self, tmp_path, monkeypatch):
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "SUBCONSCIOUS", tmp_path / "subconscious.yaml")
+        (tmp_path / "subconscious.yaml").write_text("threads: []\n")
+        from indieclaw.subconscious import quick_add
+        task_id = quick_add("A" * 100)
+        assert len(task_id) <= 40
+
+
 class TestBuildPrompt:
     def test_build_prompt(self, monkeypatch, tmp_path):
         _patch_workspace(tmp_path, monkeypatch)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import yaml
 
@@ -83,6 +83,25 @@ def resolve_thread(thread_id: str) -> bool:
         return False
     save_threads(new_threads)
     return True
+
+
+def quick_add(text: str) -> str:
+    """Create a task from free text with auto-generated fields."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
+    if not slug:
+        slug = f"task-{_now().strftime('%H%M%S')}"
+    now = _now()
+    expires = (now + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    thread_data = {
+        "id": slug,
+        "created": now.strftime("%Y-%m-%d"),
+        "priority": "medium",
+        "summary": text[:120],
+        "action": "act",
+        "expires": expires,
+    }
+    return add_thread(thread_data)
 
 
 def build_prompt(threads: list[dict], recent_logs: str, memory: str) -> str:

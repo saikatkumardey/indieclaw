@@ -26,7 +26,7 @@ from .auth import is_allowed, require_allowed
 from .browser import BrowserManager
 from .config import Config
 from .session_state import SessionState
-from .subconscious import load_threads
+from .subconscious import load_threads, quick_add, resolve_thread
 from .tool_loader import load_custom_tools
 from .tools_sdk import CUSTOM_TOOLS
 from .version import check_remote_version as _check_remote_version
@@ -133,7 +133,8 @@ async def on_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "/model \u2014 switch Claude model (opus/sonnet/haiku)\n"
         "/effort \u2014 thinking effort level\n"
         "/status \u2014 current config and stats\n"
-        "/threads \u2014 show subconscious threads\n\n"
+        "/tasks \u2014 list open tasks\n"
+        "/task \u2014 add/done/drop tasks\n\n"
         "<b>System</b>\n"
         "/crons \u2014 scheduled jobs\n"
         "/restart \u2014 restart the bot\n"
@@ -354,13 +355,15 @@ async def on_streaming(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @require_allowed
-async def on_threads(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+async def on_tasks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     cfg = Config.load()
     enabled = cfg.get("subconscious_enabled", True)
     interval = cfg.get("subconscious_interval_hours", 2)
 
     if not enabled:
-        await update.message.reply_text("\U0001f9e0 Subconscious \u2014 disabled")
+        await update.message.reply_text(
+            "\U0001f9e0 Subconscious \u2014 disabled\n\nUse /task add <text> to create tasks."
+        )
         return
 
     threads = load_threads()
@@ -368,14 +371,14 @@ async def on_threads(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     header = f"\U0001f9e0 <b>Subconscious</b> \u2014 enabled (every {interval}h)\n"
 
     if not threads:
-        text = header + "\nNo open threads."
+        text = header + "\nNo open tasks.\n\nUse /task add <text> to create one."
         try:
             await update.message.reply_text(text, parse_mode="HTML")
         except Exception:
             await update.message.reply_text(text)
         return
 
-    lines = [header, f"\n\U0001f4cb <b>Open threads</b> ({len(threads)})\n"]
+    lines = [header, f"\n\U0001f4cb <b>Open tasks</b> ({len(threads)})\n"]
     for t in threads:
         priority = t.get("priority", "?")
         tid = t.get("id", "?")
@@ -394,3 +397,56 @@ async def on_threads(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(text, parse_mode="HTML")
     except Exception:
         await update.message.reply_text(text)
+
+
+@require_allowed
+async def on_task(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (update.message.text or "").strip()
+    # Parse: /task add <text> | /task done <id> | /task drop <id>
+    parts = text.split(None, 2)  # ["/task", "add", "rest..."]
+
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "<b>Task commands</b>\n\n"
+            "/task add &lt;text&gt; \u2014 create a task\n"
+            "/task done &lt;id&gt; \u2014 mark complete\n"
+            "/task drop &lt;id&gt; \u2014 remove\n"
+            "/tasks \u2014 list all",
+            parse_mode="HTML",
+        )
+        return
+
+    action = parts[1].lower()
+    arg = parts[2].strip() if len(parts) > 2 else ""
+
+    if action == "add":
+        if not arg:
+            await update.message.reply_text("Usage: /task add <description>")
+            return
+        try:
+            task_id = quick_add(arg)
+            await update.message.reply_text(
+                f"\u2705 Task added: <code>{_html.escape(task_id)}</code>",
+                parse_mode="HTML",
+            )
+        except ValueError as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    elif action in ("done", "drop"):
+        if not arg:
+            await update.message.reply_text(f"Usage: /task {action} <id>")
+            return
+        removed = resolve_thread(arg)
+        if removed:
+            verb = "Completed" if action == "done" else "Dropped"
+            await update.message.reply_text(
+                f"\u2705 {verb}: <code>{_html.escape(arg)}</code>",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(f"Task not found: {_html.escape(arg)}")
+
+    else:
+        await update.message.reply_text(
+            f"Unknown action: {_html.escape(action)}. Use add, done, or drop."
+        )
