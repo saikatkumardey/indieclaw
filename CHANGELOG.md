@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.32] - 2026-04-05
+
+- feat: add acknowledge-before-working rule to shipped AGENT.md template
+
+
 ## [0.1.31] - 2026-04-05
 
 - feat: unified /task add/done/drop + /tasks list, replacing /threads
