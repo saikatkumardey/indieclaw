@@ -2,6 +2,14 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.30] - 2026-04-05
+
+- feat: /threads command for subconscious transparency
+- release: v0.1.29
+- feat: auto-inject recent context on new session start
+- ci: update python-doctor badge to 91/100
+
+
 ## [0.1.29] - 2026-04-04
 
 - feat: auto-inject recent context on new session start
