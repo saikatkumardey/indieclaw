@@ -8,6 +8,8 @@
 
 Personal AI agent on Telegram. Self-hosted, powered by Claude.
 
+**Requires:** An [Anthropic API key](https://console.anthropic.com/) or [Claude Pro/Max subscription](https://claude.ai/). IndieClaw uses Claude as its reasoning engine — you need one or the other to run it.
+
 ## Install
 
 ```bash
