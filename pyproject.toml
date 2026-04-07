@@ -25,6 +25,7 @@ dependencies = [
     "playwright>=1.40.0",
     "edge-tts>=6.1.0",
     "aiohttp>=3.9.0",
+    "mempalace @ git+https://github.com/milla-jovovich/mempalace.git",
 ]
 
 [project.scripts]
@@ -33,6 +34,9 @@ indieclaw = "indieclaw.main:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["indieclaw", "templates"]
