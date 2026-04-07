@@ -1,4 +1,8 @@
-import json, tempfile, os, pytest
+import json
+import os
+import tempfile
+
+import pytest
 
 _tmp = tempfile.mkdtemp()
 os.environ["MEMPALACE_PALACE_PATH"] = os.path.join(_tmp, "palace")
