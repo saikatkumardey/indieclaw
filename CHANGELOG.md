@@ -2,6 +2,21 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.36] - 2026-04-07
+
+- clarify Anthropic subscription/API key requirement in README
+- bump: 0.1.35
+- fix bootstrap: convert indieclaw JSONL to transcript before mining
+- bump: 0.1.34
+- add mempalace bootstrap script for session log mining
+- add mempalace_knowledge tool and tests
+- add mempalace_diary tool and tests
+- add mempalace dependency for persistent memory
+- fix: add tasks/task to _BOT_COMMANDS so sync_commands registers them
+- bump: 0.1.33
+- fix: suppress duplicate reply when telegram_send already confirmed
+
+
 ## [0.1.32] - 2026-04-05
 
 - feat: add acknowledge-before-working rule to shipped AGENT.md template

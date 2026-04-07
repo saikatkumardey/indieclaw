@@ -1,6 +1,6 @@
 [project]
 name = "indieclaw"
-version = "0.1.35"
+version = "0.1.36"
 description = "Self-hosted Telegram AI agent. 10 tools, skills, subconscious, CLI learning."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,7 +25,6 @@ dependencies = [
     "playwright>=1.40.0",
     "edge-tts>=6.1.0",
     "aiohttp>=3.9.0",
-    "mempalace @ git+https://github.com/milla-jovovich/mempalace.git",
 ]
 
 [project.scripts]
