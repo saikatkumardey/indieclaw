@@ -216,10 +216,15 @@ async def _post_init(app, scheduler, commands) -> None:
     from .auth import default_chat_id
     default_chat = default_chat_id()
     if default_chat:
+        from . import workspace
         from .version import local_version
         ver = local_version()
+        branch = workspace.get_branch()
+        label = f"\u2705 IndieClaw v{ver} online"
+        if branch:
+            label += f" (branch: `{branch}`)"
         try:
-            await app.bot.send_message(chat_id=default_chat, text=f"\u2705 IndieClaw v{ver} online")
+            await app.bot.send_message(chat_id=default_chat, text=label, parse_mode="Markdown")
         except (OSError, RuntimeError):
             pass  # best-effort startup notification; bot may not be ready
 
