@@ -50,3 +50,24 @@ def test_read_missing_file(tmp_path):
     missing = tmp_path / "missing.md"
     assert read(missing) == ""
     assert read(missing, default="fallback") == "fallback"
+
+
+class TestBranch:
+    def test_get_branch_no_file(self, tmp_path, monkeypatch):
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "BRANCH_FILE", tmp_path / ".branch")
+        assert ws.get_branch() is None
+
+    def test_set_and_get_branch(self, tmp_path, monkeypatch):
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "BRANCH_FILE", tmp_path / ".branch")
+        ws.set_branch("feat-x")
+        assert ws.get_branch() == "feat-x"
+
+    def test_set_branch_none_deletes_file(self, tmp_path, monkeypatch):
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "BRANCH_FILE", tmp_path / ".branch")
+        ws.set_branch("feat-x")
+        ws.set_branch(None)
+        assert ws.get_branch() is None
+        assert not (tmp_path / ".branch").exists()

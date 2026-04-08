@@ -22,6 +22,7 @@ SUBCONSCIOUS   = HOME / "subconscious.yaml"
 CONFIG        = HOME / "indieclaw.json"
 SESSION_STATE = HOME / "session_state.json"
 PID_FILE      = HOME / ".pid"
+BRANCH_FILE   = HOME / ".branch"
 LOG_FILE      = HOME / "indieclaw.log"
 
 _TEMPLATES = Path(__file__).parent.parent / "templates"
@@ -99,3 +100,18 @@ def write_json(path: Path, data: dict) -> None:
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
+
+
+def get_branch() -> str | None:
+    try:
+        text = BRANCH_FILE.read_text().strip()
+        return text or None
+    except OSError:
+        return None
+
+
+def set_branch(branch: str | None) -> None:
+    if branch:
+        BRANCH_FILE.write_text(branch + "\n")
+    else:
+        BRANCH_FILE.unlink(missing_ok=True)
