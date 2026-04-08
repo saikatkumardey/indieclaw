@@ -306,8 +306,19 @@ async def on_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     import signal
     import subprocess as _subprocess
 
+    # Parse --branch <name> from message text
+    text = update.message.text or ""
+    parts = text.split()
+    branch = None
+    for i, p in enumerate(parts):
+        if p == "--branch" and i + 1 < len(parts):
+            branch = parts[i + 1]
+            break
+
     old_version = _local_version()
     source = os.getenv("INDIECLAW_SOURCE", "git+https://github.com/saikatkumardey/indieclaw")
+    if branch:
+        source = f"{source}@{branch}"
 
     placeholder = await update.message.reply_text("Checking for updates…")
 
@@ -317,12 +328,14 @@ async def on_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             logger.debug("failed to edit placeholder text", exc_info=True)
 
-    remote = await asyncio.to_thread(_check_remote_version, source)
-    if remote and remote == old_version:
-        await _edit(f"Already on latest (v{old_version}).")
-        return
+    if not branch:
+        remote = await asyncio.to_thread(_check_remote_version, source)
+        if remote and remote == old_version:
+            await _edit(f"Already on latest (v{old_version}).")
+            return
 
-    await _edit("Update available — installing…")
+    label = f"branch `{branch}`" if branch else "latest"
+    await _edit(f"Installing {label}…")
     try:
         result = await asyncio.to_thread(
             _subprocess.run,
@@ -337,9 +350,14 @@ async def on_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _edit(f"Update failed:\n{result.stderr[:500]}")
         return
 
-    summary = await asyncio.to_thread(_get_update_summary, source, old_version)
+    from . import workspace
+    workspace.set_branch(branch)  # None clears the file
 
-    await _edit(f"Updated. Restarting…\n\n{summary}")
+    if branch:
+        await _edit(f"Installed from branch `{branch}`. Restarting…")
+    else:
+        summary = await asyncio.to_thread(_get_update_summary, source, old_version)
+        await _edit(f"Updated. Restarting…\n\n{summary}")
     os.kill(os.getpid(), signal.SIGTERM)
 
 

@@ -453,6 +453,90 @@ class TestOnUpdate:
         import signal
         mock_kill.assert_called_with(12345, signal.SIGTERM)
 
+    @pytest.mark.asyncio
+    async def test_update_with_branch_installs_from_branch(self, monkeypatch, tmp_path):
+        """--branch staging should install from @staging URL and persist the branch."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        import indieclaw.workspace as ws
+        from indieclaw.handlers import on_update
+        monkeypatch.setattr(ws, "BRANCH_FILE", tmp_path / ".branch")
+
+        update = _make_update(text="/update --branch staging")
+        ctx = _make_context()
+
+        monkeypatch.setattr("indieclaw.handlers_commands._local_version", lambda: "0.4.7")
+
+        mock_install = MagicMock()
+        mock_install.returncode = 0
+        mock_install.stdout = "Installed"
+        mock_install.stderr = ""
+
+        captured_cmd = []
+        call_count = 0
+
+        async def fake_to_thread(fn, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            # branch mode: only call is subprocess.run (no version check, no summary)
+            if call_count == 1:
+                captured_cmd.extend(a[0])  # first positional arg is the cmd list
+                return mock_install
+            return "summary"
+
+        import indieclaw.handlers as _h
+        with patch.object(_h.asyncio, "to_thread", side_effect=fake_to_thread), \
+             patch("os.kill"), \
+             patch("os.getpid", return_value=12345):
+            await on_update(update, ctx)
+
+        # install URL must contain @staging
+        assert any("@staging" in part for part in captured_cmd), f"cmd was: {captured_cmd}"
+        # branch file must be persisted
+        assert ws.get_branch() == "staging"
+
+    @pytest.mark.asyncio
+    async def test_update_no_branch_clears_branch_file(self, monkeypatch, tmp_path):
+        """Plain /update (no --branch) should clear any persisted branch."""
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        import indieclaw.workspace as ws
+        from indieclaw.handlers import on_update
+        monkeypatch.setattr(ws, "BRANCH_FILE", tmp_path / ".branch")
+
+        # pre-set a branch
+        ws.set_branch("old-branch")
+        assert ws.get_branch() == "old-branch"
+
+        update = _make_update(text="/update")
+        ctx = _make_context()
+
+        monkeypatch.setattr("indieclaw.handlers_commands._local_version", lambda: "0.4.7")
+
+        mock_install = MagicMock()
+        mock_install.returncode = 0
+        mock_install.stdout = "Installed"
+        mock_install.stderr = ""
+
+        call_count = 0
+
+        async def fake_to_thread(fn, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "0.5.0"      # _check_remote_version
+            elif call_count == 2:
+                return mock_install  # subprocess.run
+            else:
+                return "summary"    # _get_update_summary
+
+        import indieclaw.handlers as _h
+        with patch.object(_h.asyncio, "to_thread", side_effect=fake_to_thread), \
+             patch("os.kill"), \
+             patch("os.getpid", return_value=12345):
+            await on_update(update, ctx)
+
+        # branch file must be cleared
+        assert ws.get_branch() is None
+
 
 # ---------------------------------------------------------------------------
 # Reaction handler — message=None safety
