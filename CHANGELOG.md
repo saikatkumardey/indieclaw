@@ -2,14 +2,6 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
-## [0.1.37] - 2026-04-08
-
-- Add branch param to self_update tool
-- feat: add --branch flag to /update command
-- add branch persistence helpers to workspace
-- remove mempalace test and bootstrap script
-
-
 ## [0.1.36] - 2026-04-07
 
 - clarify Anthropic subscription/API key requirement in README
