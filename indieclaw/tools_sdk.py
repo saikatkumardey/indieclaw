@@ -22,7 +22,6 @@ from .tools import (
 )
 from .tools_browser import browse, browser_click, browser_eval, browser_screenshot, browser_type
 from .version import check_remote_version as _check_remote_version
-from .version import get_update_summary as _get_update_summary
 from .version import local_version as _local_version
 
 _ALLOWED_SOURCE_PREFIX = "git+https://github.com/saikatkumardey/indieclaw"
@@ -89,19 +88,22 @@ async def self_restart(args: dict) -> dict:
     return _text("unreachable")
 
 
-@tool("self_update", "Check for updates and install if a newer version is available.", {})
+@tool("self_update", "Check for updates and install if a newer version is available. Pass branch to install from a specific git branch.", {"branch": str})
 async def self_update(args: dict) -> dict:
+    branch = args.get("branch") or None
     source = os.getenv("INDIECLAW_SOURCE", "git+https://github.com/saikatkumardey/indieclaw")
     if not source.startswith(_ALLOWED_SOURCE_PREFIX):
         return _text(f"Error: INDIECLAW_SOURCE {source!r} is not an allowed update URL.")
 
-    old_version = _local_version()
-    remote = await asyncio.to_thread(_check_remote_version, source)
+    if branch:
+        source = f"{source}@{branch}"
 
-    if remote and remote == old_version:
-        return _text(f"Already on latest version (v{old_version}). No update needed.")
+    if not branch:
+        old_version = _local_version()
+        remote = await asyncio.to_thread(_check_remote_version, source)
+        if remote and remote == old_version:
+            return _text(f"Already on latest version (v{old_version}). No update needed.")
 
-    # Install latest from git
     result = await asyncio.to_thread(
         subprocess.run,
         ["pip3", "install", "--upgrade", "--break-system-packages", source],
@@ -115,9 +117,11 @@ async def self_update(args: dict) -> dict:
             await asyncio.to_thread(_send_telegram, chat_id, msg)
         return _text(msg)
 
-    summary = _get_update_summary(source, old_version)
+    workspace.set_branch(branch)
+
+    label = f"branch `{branch}`" if branch else "latest"
     if chat_id:
-        await asyncio.to_thread(_send_telegram, chat_id, f"Update successful. Restarting...\n\n{summary}")
+        await asyncio.to_thread(_send_telegram, chat_id, f"Installed {label}. Restarting...")
 
     import signal
     os.kill(os.getpid(), signal.SIGTERM)

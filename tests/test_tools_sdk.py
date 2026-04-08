@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -339,3 +339,33 @@ class TestUpdateSubconscious:
         })
         text = result["content"][0]["text"]
         assert "cap reached" in text.lower()
+
+
+class TestSelfUpdateBranch:
+    @pytest.mark.asyncio
+    async def test_self_update_with_branch(self, monkeypatch, tmp_path):
+        _patch_workspace(tmp_path, monkeypatch)
+        import indieclaw.workspace as ws
+        monkeypatch.setattr(ws, "BRANCH_FILE", tmp_path / ".branch")
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+        monkeypatch.setattr("indieclaw.tools_sdk._local_version", lambda: "0.5.0")
+
+        mock_install = MagicMock()
+        mock_install.returncode = 0
+        mock_install.stdout = "Installed"
+        mock_install.stderr = ""
+
+        installed_cmd = []
+        def fake_run(cmd, **kw):
+            installed_cmd.append(cmd)
+            return mock_install
+        monkeypatch.setattr("indieclaw.tools_sdk.subprocess.run", fake_run)
+        monkeypatch.setattr("indieclaw.tools_sdk._send_telegram", lambda *a, **kw: None)
+        monkeypatch.setattr("indieclaw.tools_sdk.default_chat_id", lambda: "123")
+
+        from indieclaw.tools_sdk import self_update
+        with patch("os.kill"), patch("os.getpid", return_value=1):
+            await _call_tool(self_update, {"branch": "feat-x"})
+
+        assert any("@feat-x" in str(c) for c in installed_cmd)
+        assert ws.get_branch() == "feat-x"
