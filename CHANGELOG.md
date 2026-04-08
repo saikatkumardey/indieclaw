@@ -2,6 +2,12 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.37] - 2026-04-08
+
+- Show branch name in startup message when running from non-main branch
+- Revert "release: v0.1.37"
+
+
 ## [0.1.36] - 2026-04-07
 
 - clarify Anthropic subscription/API key requirement in README
