@@ -558,16 +558,23 @@ async def on_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def _transcribe_voice(path: str) -> str | None:
-    """Transcribe a voice file via claude CLI. Returns transcript or None on failure."""
+    """Transcribe a voice file via openai-whisper. Returns transcript or None on failure."""
     import subprocess as _sp
+    script = (
+        "import whisper, sys; "
+        f"model = whisper.load_model('tiny'); "
+        f"print(model.transcribe({path!r})['text'].strip())"
+    )
     try:
         result = await asyncio.to_thread(
             _sp.run,
-            ["claude", "-p", "Transcribe this audio exactly. Output only the transcript, nothing else.", "--file", path],
-            capture_output=True, text=True, timeout=30,
+            ["uv", "run", "--with", "openai-whisper", "python3", "-c", script],
+            capture_output=True, text=True, timeout=60,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
+        if result.stderr:
+            logger.warning("Whisper stderr: {}", result.stderr[:200])
     except (OSError, _sp.TimeoutExpired) as e:
         logger.warning("Voice transcription failed: {}", e)
     return None
