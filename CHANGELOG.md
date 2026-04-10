@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.40] - 2026-04-10
+
+- Lean codebase: remove CC sessions, tasks, TUI; gut setup/doctor; dedup agent/handlers
+
+
 ## [0.1.39] - 2026-04-10
 
 - Remove dead code, redundant copies, and duplicate logic across codebase
