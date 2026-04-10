@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re as _re
+import shutil
 import subprocess
 import time as _time
 from collections import defaultdict
@@ -235,14 +236,9 @@ def session_log(chat_id: str, role: str, content: str | dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _rtk_bin() -> str | None:
-    import shutil
-    return shutil.which("rtk")
-
-
 def _rtk_rewrite(cmd: str) -> tuple[str, bool]:
     """Rewrite a shell command via `rtk rewrite`. Returns (rewritten_cmd, changed)."""
-    rtk = _rtk_bin()
+    rtk = shutil.which("rtk")
     if not rtk:
         return cmd, False
     try:
@@ -320,43 +316,22 @@ def _make_agents(chat_id: str) -> dict[str, AgentDefinition] | None:
     }
 
 # ---------------------------------------------------------------------------
-# Tool selection & option building
+# Option building (model/effort/max_turns/tools inlined)
 # ---------------------------------------------------------------------------
-
-
-def _select_tools_for_chat(chat_id: str, cfg: Config) -> list:
-    if chat_id.startswith("cron:subconscious"):
-        from .tools_sdk import reflect, telegram_send, update_subconscious
-        return [telegram_send, update_subconscious, reflect]
-    return [*CUSTOM_TOOLS]
-
-
-def _select_model(chat_id: str, cfg: Config) -> str:
-    model = cfg.get("model")
-    if chat_id.startswith("cron:subconscious"):
-        return cfg.get("subconscious_model") or model
-    if chat_id.startswith("cron:"):
-        return cfg.get("cron_model") or model
-    return model
-
-
-def _select_max_turns(chat_id: str, cfg: Config) -> int:
-    if chat_id.startswith("cron:subconscious"):
-        return 3
-    return cfg.get("max_turns")
-
-
-def _select_effort(chat_id: str, cfg: Config) -> str:
-    if chat_id.startswith("cron:subconscious"):
-        return "low"
-    return cfg.get("effort")
 
 
 def _make_options(chat_id: str, resume: str | None = None) -> ClaudeAgentOptions:
     cfg = Config.load()
     is_cron = chat_id.startswith("cron:")
+    is_subconscious = chat_id.startswith("cron:subconscious")
 
-    indieclaw_tools = _select_tools_for_chat(chat_id, cfg)
+    # Select tools
+    if is_subconscious:
+        from .tools_sdk import reflect, telegram_send, update_subconscious
+        indieclaw_tools = [telegram_send, update_subconscious, reflect]
+    else:
+        indieclaw_tools = [*CUSTOM_TOOLS]
+
     indieclaw_server = create_sdk_mcp_server(name="indieclaw", version="1.0.0", tools=indieclaw_tools)
     indieclaw_tool_names = [f"mcp__indieclaw__{t.name}" for t in indieclaw_tools]
 
@@ -366,20 +341,27 @@ def _make_options(chat_id: str, resume: str | None = None) -> ClaudeAgentOptions
         allowed = [*indieclaw_tool_names]
 
     mcp_servers = {"indieclaw": indieclaw_server}
-    if _dynamic_mcp_server is not None and not chat_id.startswith("cron:subconscious"):
+    if _dynamic_mcp_server is not None and not is_subconscious:
         mcp_servers["dynamic"] = _dynamic_mcp_server
         allowed.append("mcp__dynamic__*")
 
+    # Select model
+    model = cfg.get("model")
+    if is_subconscious:
+        model = cfg.get("subconscious_model") or model
+    elif is_cron:
+        model = cfg.get("cron_model") or model
+
     return ClaudeAgentOptions(
-        model=_select_model(chat_id, cfg),
+        model=model,
         system_prompt=_system_prompt(slim=is_cron),
         allowed_tools=allowed,
         disallowed_tools=["WebFetch"],
         mcp_servers=mcp_servers,
         permission_mode="bypassPermissions",
         cwd=str(workspace.HOME),
-        max_turns=_select_max_turns(chat_id, cfg),
-        effort=_select_effort(chat_id, cfg),
+        max_turns=3 if is_subconscious else cfg.get("max_turns"),
+        effort="low" if is_subconscious else cfg.get("effort"),
         include_partial_messages=True,
         resume=resume if not is_cron else None,
         max_budget_usd=cfg.get("max_budget_usd") or None,
@@ -425,7 +407,11 @@ def _extract_stream_delta(msg: StreamEvent) -> str | None:
     return delta.get("text", "") or None
 
 
-def _record_result(chat_id: str, msg: ResultMessage) -> None:
+def _handle_result(chat_id: str, msg: ResultMessage) -> None:
+    if msg.session_id:
+        _session_ids[chat_id] = msg.session_id
+    _last_usage[chat_id] = msg.usage or {}
+    _last_usage[chat_id]["_model"] = getattr(msg, "model", "") or ""
     usage = msg.usage or {}
     session_log(chat_id, "result", {
         "turns": msg.num_turns,
@@ -439,6 +425,35 @@ def _record_result(chat_id: str, msg: ResultMessage) -> None:
         SessionState.load().record_turn(chat_id, msg)
     except Exception as e:
         logger.warning("SessionState.record_turn failed: {}", e)
+
+# ---------------------------------------------------------------------------
+# Turn preparation (shared between run and run_streaming)
+# ---------------------------------------------------------------------------
+
+
+def _prepare_turn(chat_id: str, user_message: str) -> tuple[ClaudeAgentOptions, str]:
+    """Common preamble for run() and run_streaming().
+
+    Returns (options, timestamped_message).
+    """
+    session_id = _session_ids.get(chat_id)
+    options = _make_options(chat_id, resume=session_id)
+    session_log(chat_id, "user", user_message)
+    _tools_used_this_turn.pop(chat_id, None)
+    _tool_timings.pop(chat_id, None)
+    _pending_tool_starts.pop(chat_id, None)
+
+    # Inject recent context on first message of a new session
+    agent_msg = user_message
+    if not session_id:
+        context = _load_recent_context(chat_id)
+        if context:
+            agent_msg = (
+                f"[Recent context from past conversations:]\n{context}\n\n"
+                f"{user_message}"
+            )
+
+    return options, _timestamp_message(agent_msg)
 
 # ---------------------------------------------------------------------------
 # Main entry points
@@ -497,18 +512,6 @@ def _load_recent_context(chat_id: str, max_chars: int = 2000) -> str:
     return result
 
 
-def _collect_text(msg: AssistantMessage) -> list[str]:
-    return [block.text for block in msg.content if isinstance(block, TextBlock)]
-
-
-def _handle_result(chat_id: str, msg: ResultMessage) -> None:
-    if msg.session_id:
-        _session_ids[chat_id] = msg.session_id
-    _last_usage[chat_id] = msg.usage or {}
-    _last_usage[chat_id]["_model"] = getattr(msg, "model", "") or ""
-    _record_result(chat_id, msg)
-
-
 async def _run_once(chat_id: str, user_message: str, options) -> str:
     """Execute a single agent turn, returning the reply text."""
     cfg = Config.load()
@@ -529,7 +532,7 @@ async def _run_once(chat_id: str, user_message: str, options) -> str:
                     first_event = False
                 deadline.reschedule(loop.time() + stall)
                 if isinstance(msg, AssistantMessage):
-                    parts.extend(_collect_text(msg))
+                    parts.extend(block.text for block in msg.content if isinstance(block, TextBlock))
                 elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
                     logger.info("SDK compacted context for {}", chat_id)
                 elif isinstance(msg, ResultMessage):
@@ -551,24 +554,7 @@ async def run(chat_id: str, user_message: str) -> str:
     reload_dynamic_tools()
     lock = _session_locks[chat_id]
     async with lock:
-        session_id = _session_ids.get(chat_id)
-        options = _make_options(chat_id, resume=session_id)
-        session_log(chat_id, "user", user_message)
-        _tools_used_this_turn.pop(chat_id, None)
-        _tool_timings.pop(chat_id, None)
-        _pending_tool_starts.pop(chat_id, None)
-
-        # Inject recent context on first message of a new session
-        agent_msg = user_message
-        if not session_id:
-            context = _load_recent_context(chat_id)
-            if context:
-                agent_msg = (
-                    f"[Recent context from past conversations:]\n{context}\n\n"
-                    f"{user_message}"
-                )
-
-        timestamped = _timestamp_message(agent_msg)
+        options, timestamped = _prepare_turn(chat_id, user_message)
 
         reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, timestamped, options)))
 
@@ -591,24 +577,7 @@ async def run_streaming(chat_id: str, user_message: str):
     reload_dynamic_tools()
     lock = _session_locks[chat_id]
     async with lock:
-        session_id = _session_ids.get(chat_id)
-        options = _make_options(chat_id, resume=session_id)
-        session_log(chat_id, "user", user_message)
-        _tools_used_this_turn.pop(chat_id, None)
-        _tool_timings.pop(chat_id, None)
-        _pending_tool_starts.pop(chat_id, None)
-
-        # Inject recent context on first message of a new session
-        agent_msg = user_message
-        if not session_id:
-            context = _load_recent_context(chat_id)
-            if context:
-                agent_msg = (
-                    f"[Recent context from past conversations:]\n{context}\n\n"
-                    f"{user_message}"
-                )
-
-        timestamped = _timestamp_message(agent_msg)
+        options, timestamped = _prepare_turn(chat_id, user_message)
         cfg = Config.load()
         initial_timeout = cfg.get("agent_initial_timeout")
         stall = cfg.get("agent_stall_timeout")
@@ -630,7 +599,7 @@ async def run_streaming(chat_id: str, user_message: str):
                     if isinstance(msg, StreamEvent) and (text := _extract_stream_delta(msg)):
                         yield ("text_delta", text)
                     elif isinstance(msg, AssistantMessage):
-                        parts.extend(_collect_text(msg))
+                        parts.extend(block.text for block in msg.content if isinstance(block, TextBlock))
                     elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
                         logger.info("SDK compacted context for {}", chat_id)
                     elif isinstance(msg, ResultMessage):

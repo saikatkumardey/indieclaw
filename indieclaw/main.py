@@ -54,117 +54,17 @@ def setup_rtk() -> None:
         raise typer.Exit(1)
 
 
-def _setup_token_prompt_choice(console):
-    import questionary
-    from rich.panel import Panel
-
-    console.print()
-    console.print(Panel(
-        "[bold]IndieClaw uses [cyan]claude-agent-sdk[/cyan] to power your AI agent.[/bold]\n\n"
-        "You need to authenticate with Claude. Choose how:\n\n"
-        "  [bold cyan]1. API key[/bold cyan]   — Paste an [link=https://console.anthropic.com/settings/keys]Anthropic API key[/link] "
-        "(works with any Anthropic account)\n"
-        "  [bold cyan]2. Login[/bold cyan]     — Sign in with your Claude.ai account "
-        "[dim](Claude Pro / Max / Team subscription)[/dim]",
-        title="[blue]Claude Authentication[/blue]",
-        border_style="blue",
-        padding=(1, 2),
-    ))
-    console.print()
-
-    try:
-        return questionary.select(
-            "How would you like to authenticate?",
-            choices=[
-                questionary.Choice("Paste an API key  (console.anthropic.com/settings/keys)", value="key"),
-                questionary.Choice("Login with Claude account  (Claude Pro / Max subscription)", value="login"),
-            ],
-            style=questionary.Style([
-                ("selected", "fg:cyan bold"),
-                ("pointer", "fg:cyan bold"),
-                ("question", "fg:blue bold"),
-            ]),
-        ).ask()
-    except KeyboardInterrupt:
-        console.print()
-        raise typer.Exit(0)
-
-
-def _setup_token_api_key(console, env, env_path):
-    import getpass
-
-    import questionary
-
-    from .setup import _write_env
-
-    existing = env.get("ANTHROPIC_API_KEY", "")
-    if existing:
-        console.print(f"\n  [dim]Current key:[/dim] [green]{existing[:12]}…[/green]")
-        try:
-            if not questionary.confirm("Replace it?", default=False).ask():
-                console.print("  [dim]Keeping existing key.[/dim]")
-                raise typer.Exit(0)
-        except KeyboardInterrupt:
-            raise typer.Exit(0)
-
-    console.print()
-    try:
-        api_key = getpass.getpass("  Paste your ANTHROPIC_API_KEY (hidden): ").strip()
-    except KeyboardInterrupt:
-        console.print()
-        raise typer.Exit(0)
-
-    if not api_key:
-        console.print("  [yellow]No key entered — nothing saved.[/yellow]")
-        raise typer.Exit(1)
-
-    env["ANTHROPIC_API_KEY"] = api_key
-    _write_env(env_path, env)
-    console.print(f"\n  [bold green]✓[/bold green]  API key saved to [dim]{env_path}[/dim]")
-
-
-def _setup_token_login(console):
-    import subprocess
-    console.print()
-    console.print("  [dim]Opening browser for Claude.ai login…[/dim]\n")
-    try:
-        subprocess.run(["claude", "auth", "login"], check=True)
-    except FileNotFoundError:
-        console.print("  [red]✗[/red]  [bold]claude[/bold] CLI not found. The SDK should have bundled it.")
-        console.print("  Try: [bold]pip install --upgrade claude-agent-sdk[/bold]")
-        raise typer.Exit(1)
-    except subprocess.CalledProcessError:
-        console.print("  [red]✗[/red]  Login failed or was cancelled.")
-        raise typer.Exit(1)
-    console.print("\n  [bold green]✓[/bold green]  Logged in. IndieClaw will use your Claude subscription.")
-
-
 @app.command(name="setup-token")
 def setup_token() -> None:
     """Configure Claude authentication (API key or Claude.ai subscription login)."""
-    from rich.console import Console
-    from rich.rule import Rule
-
     from . import workspace
-    from .setup import _read_env
-
+    from .setup import _read_env, _write_env, step_claude_auth
     workspace.init()
-    console = Console()
     env_path = workspace.HOME / ".env"
     env = _read_env(env_path)
-
-    choice = _setup_token_prompt_choice(console)
-    if choice is None:
-        raise typer.Exit(0)
-
-    if choice == "key":
-        _setup_token_api_key(console, env, env_path)
-    else:
-        _setup_token_login(console)
-
-    console.print()
-    console.print(Rule(style="green"))
-    console.print("\n  [bold]Run your agent:[/bold]  [bold cyan]indieclaw start[/bold cyan]\n")
+    env = step_claude_auth(env)
+    _write_env(env_path, env)
+    typer.echo("Done. Run: indieclaw start")
 
 
 @app.command()
@@ -244,17 +144,6 @@ async def _post_shutdown(app, scheduler) -> None:
     delete_pid()
     logger.info("IndieClaw stopped.")
 
-
-@app.command()
-def chat() -> None:
-    """Launch the interactive TUI chat. Do not run alongside 'indieclaw start'."""
-    from . import workspace
-    workspace.init()
-    load_dotenv(workspace.HOME / ".env", override=True)
-    os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
-    os.environ.setdefault("ALLOWED_USER_IDS", "123")
-    from .tui import IndieClawApp  # deferred — env vars must be set first
-    IndieClawApp().run()
 
 
 def _start_daemon() -> None:
@@ -337,10 +226,7 @@ def _register_handlers(bot) -> list:
         ("btw",     h.on_btw,     "Ask a side question (no history)"),
         ("effort",  h.on_effort,  "Set thinking effort level"),
         ("efforts", h.on_effort, None),
-        ("cc",      h.on_cc,      "Start a live Claude Code session"),
         ("streaming", h.on_streaming, "Toggle response streaming"),
-        ("tasks",     h.on_tasks,     "List open tasks"),
-        ("task",      h.on_task,      "Add/complete/drop tasks"),
     ]
     for name, handler, _ in commands:
         bot.add_handler(CommandHandler(name, handler))

@@ -532,10 +532,7 @@ _BOT_COMMANDS = [
     ("update",    "Update indieclaw and restart"),
     ("btw",       "Ask a side question (no history)"),
     ("effort",    "Set thinking effort level"),
-    ("cc",        "Start a live Claude Code session"),
     ("streaming", "Toggle response streaming"),
-    ("tasks",     "List open tasks"),
-    ("task",      "Add/complete/drop tasks"),
 ]
 
 

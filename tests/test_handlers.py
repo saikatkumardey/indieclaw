@@ -717,41 +717,6 @@ class TestOnBtw:
 # /cc command
 # ---------------------------------------------------------------------------
 
-class TestOnCC:
-    @pytest.mark.asyncio
-    async def test_cc_no_args_shows_help(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers import on_cc
-        update = MagicMock()
-        update.effective_chat.id = 123
-        update.message.text = "/cc"
-        update.message.reply_text = AsyncMock()
-        ctx = _make_context()
-
-        with patch("indieclaw.claude_code.has_active_session", return_value=False), \
-             patch("indieclaw.claude_code.get_session_info", return_value=None):
-            await on_cc(update, ctx)
-        reply = update.message.reply_text.call_args[0][0]
-        assert "/cc" in reply
-        assert "stop" in reply.lower()
-
-    @pytest.mark.asyncio
-    async def test_cc_stop_without_session(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers import on_cc
-        update = MagicMock()
-        update.effective_chat.id = 123
-        update.message.text = "/cc stop"
-        update.message.reply_text = AsyncMock()
-        ctx = _make_context()
-
-        with patch("indieclaw.claude_code.has_active_session", return_value=False), \
-             patch("indieclaw.claude_code.stop_session", new_callable=AsyncMock, return_value=False), \
-             patch("indieclaw.claude_code.get_stop_summary", return_value=""):
-            await on_cc(update, ctx)
-        reply = update.message.reply_text.call_args[0][0]
-        assert "No active" in reply
-
 
 # ---------------------------------------------------------------------------
 # Debounce — multiple messages combined
@@ -775,8 +740,7 @@ class TestDebounceMultipleMessages:
         ctx = _make_context()
 
         with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, side_effect=mock_agent_run), \
-             patch("indieclaw.handlers.get_streaming", return_value=False), \
-             patch("indieclaw.claude_code.has_active_session", return_value=False):
+             patch("indieclaw.handlers.get_streaming", return_value=False):
             await on_message(update1, ctx)
             await on_message(update2, ctx)
             await on_message(update3, ctx)
@@ -1096,8 +1060,7 @@ class TestFollowupCancelledOnNewMessage:
         ctx = _make_context()
 
         with patch("indieclaw.handlers.agent_run", new_callable=AsyncMock, return_value="Done!"), \
-             patch("indieclaw.handlers.get_streaming", return_value=False), \
-             patch("indieclaw.claude_code.has_active_session", return_value=False):
+             patch("indieclaw.handlers.get_streaming", return_value=False):
             await _h.on_message(update, ctx)
             from indieclaw.handlers import flush_debounce
             await flush_debounce("123")
@@ -1283,165 +1246,3 @@ class TestClassifyError:
         assert "Timed out" in result
 
 
-class TestThreadsCommand:
-    @pytest.mark.asyncio
-    async def test_threads_shows_open_threads(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_tasks
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        mock_threads = [
-            {"id": "test-thread", "priority": "high", "summary": "Check deployment", "created": "2026-04-04", "expires": "2026-04-06", "action": "act"},
-        ]
-
-        with patch("indieclaw.handlers_commands.Config") as mock_cfg, \
-             patch("indieclaw.handlers_commands.load_threads", return_value=mock_threads):
-            mock_cfg.load.return_value.get = lambda k, d=None: {"subconscious_enabled": True, "subconscious_interval_hours": 2}.get(k, d)
-            await on_tasks(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "Subconscious" in text
-        assert "test-thread" in text
-        assert "Check deployment" in text
-        assert "high" in text
-
-    @pytest.mark.asyncio
-    async def test_threads_disabled(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_tasks
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        with patch("indieclaw.handlers_commands.Config") as mock_cfg:
-            mock_cfg.load.return_value.get = lambda k, d=None: {"subconscious_enabled": False}.get(k, d)
-            await on_tasks(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "disabled" in text
-
-
-class TestTaskCommands:
-    @pytest.mark.asyncio
-    async def test_tasks_shows_open(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_tasks
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        mock_threads = [
-            {"id": "test-task", "priority": "high", "summary": "Do something", "created": "2026-04-05", "expires": "2026-04-12", "action": "act"},
-        ]
-
-        with patch("indieclaw.handlers_commands.Config") as mock_cfg, \
-             patch("indieclaw.handlers_commands.load_threads", return_value=mock_threads):
-            mock_cfg.load.return_value.get = lambda k, d=None: {"subconscious_enabled": True, "subconscious_interval_hours": 2}.get(k, d)
-            await on_tasks(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "Open tasks" in text
-        assert "test-task" in text
-
-    @pytest.mark.asyncio
-    async def test_task_add(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_task
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.text = "/task add deploy blog to prod"
-        update.message.reply_text = AsyncMock()
-
-        with patch("indieclaw.handlers_commands.quick_add", return_value="deploy-blog-to-prod"):
-            await on_task(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "Task added" in text
-        assert "deploy-blog-to-prod" in text
-
-    @pytest.mark.asyncio
-    async def test_task_done(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_task
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.text = "/task done my-task"
-        update.message.reply_text = AsyncMock()
-
-        with patch("indieclaw.handlers_commands.resolve_thread", return_value=True):
-            await on_task(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "Completed" in text
-
-    @pytest.mark.asyncio
-    async def test_task_drop(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_task
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.text = "/task drop old-task"
-        update.message.reply_text = AsyncMock()
-
-        with patch("indieclaw.handlers_commands.resolve_thread", return_value=True):
-            await on_task(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "Dropped" in text
-
-    @pytest.mark.asyncio
-    async def test_task_not_found(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_task
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.text = "/task done nonexistent"
-        update.message.reply_text = AsyncMock()
-
-        with patch("indieclaw.handlers_commands.resolve_thread", return_value=False):
-            await on_task(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "not found" in text
-
-    @pytest.mark.asyncio
-    async def test_task_no_args_shows_help(self, monkeypatch):
-        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
-        from indieclaw.handlers_commands import on_task
-
-        update = MagicMock()
-        update.effective_chat = MagicMock()
-        update.effective_chat.id = 123
-        update.message = MagicMock()
-        update.message.text = "/task"
-        update.message.reply_text = AsyncMock()
-
-        await on_task(update, MagicMock())
-
-        text = update.message.reply_text.await_args[0][0]
-        assert "add" in text
-        assert "done" in text
-        assert "drop" in text

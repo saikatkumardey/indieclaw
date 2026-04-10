@@ -21,11 +21,6 @@ SUBCONSCIOUS_OK = "SUBCONSCIOUS_OK"
 _CRON_TIMEOUT_SECONDS = 300
 _SUBCONSCIOUS_TIMEOUT_SECONDS = 600
 
-_auth_fail_count = 0
-_AUTH_ALERT_THRESHOLD = 3
-_auth_alert_sent = False
-
-
 def _run_agent_on_main_loop(job_id: str, prompt: str, timeout: int) -> tuple[str | None, Exception | None]:
     """Run agent coroutine on the main event loop via run_coroutine_threadsafe.
 
@@ -57,43 +52,6 @@ def _should_suppress_result(job_id: str, result: str) -> bool:
     return result == "(no response)"
 
 
-def _is_auth_error(exc: Exception) -> bool:
-    exc_str = str(exc).lower()
-    return "401" in exc_str or "authentication" in exc_str or "oauth" in exc_str or ("token" in exc_str and "expired" in exc_str)
-
-
-_AUTH_REMIND_INTERVAL = 10
-
-
-def _handle_auth_failure(job_id: str, exc: Exception, deliver_to: str) -> None:
-    global _auth_fail_count, _auth_alert_sent
-    _auth_fail_count += 1
-    if not deliver_to:
-        return
-    if _auth_fail_count >= _AUTH_ALERT_THRESHOLD and not _auth_alert_sent:
-        _send_telegram(
-            chat_id=deliver_to,
-            message=f"⚠️ AUTH DOWN — {_auth_fail_count} consecutive auth failures. "
-            f"OAuth token likely expired. All crons are failing. "
-            f"Please run: claude /login"
-        )
-        _auth_alert_sent = True
-    elif _auth_alert_sent and _auth_fail_count % _AUTH_REMIND_INTERVAL == 0:
-        _send_telegram(
-            chat_id=deliver_to,
-            message=f"⚠️ AUTH STILL DOWN — {_auth_fail_count} consecutive failures. "
-            f"Please run: claude /login"
-        )
-    elif not _auth_alert_sent:
-        _send_telegram(chat_id=deliver_to, message=f"Cron '{job_id}' failed: {exc}")
-
-
-def _reset_auth_tracking() -> None:
-    global _auth_fail_count, _auth_alert_sent
-    _auth_fail_count = 0
-    _auth_alert_sent = False
-
-
 def _run_job(job_id: str, prompt: str, deliver_to: str, timeout: int | None = None) -> None:
     if timeout is None:
         timeout = _CRON_TIMEOUT_SECONDS
@@ -101,23 +59,11 @@ def _run_job(job_id: str, prompt: str, deliver_to: str, timeout: int | None = No
 
     result, exc = _run_agent_on_main_loop(job_id, prompt, timeout)
 
-    if isinstance(exc, TimeoutError):
-        logger.error("Cron {} timed out after {}s — thread abandoned (daemon, will die on exit)", job_id, timeout)
-        if deliver_to:
-            _send_telegram(chat_id=deliver_to, message=f"Cron '{job_id}' timed out after {timeout}s.")
-        return
-
     if exc is not None:
         logger.error("Cron {} failed: {}", job_id, exc, exc_info=exc)
-        if _is_auth_error(exc):
-            _handle_auth_failure(job_id, exc, deliver_to)
-        else:
-            _reset_auth_tracking()
-            if deliver_to:
-                _send_telegram(chat_id=deliver_to, message=f"Cron '{job_id}' failed: {exc}")
+        if deliver_to:
+            _send_telegram(chat_id=deliver_to, message=f"Cron '{job_id}' failed: {exc}")
         return
-
-    _reset_auth_tracking()
 
     if not _should_suppress_result(job_id, result) and deliver_to:
         _send_telegram(chat_id=deliver_to, message=result)
@@ -203,17 +149,6 @@ def _cleanup_idle_browsers() -> None:
         logger.warning("Browser cleanup failed: {}", e)
 
 
-def _cleanup_idle_cc_sessions() -> None:
-    """Prune CC sessions that have been idle for too long."""
-    try:
-        from .claude_code import cleanup_idle_sessions
-        removed = cleanup_idle_sessions()
-        if removed:
-            logger.info("Cleaned up {} idle CC session(s)", removed)
-    except Exception as e:
-        logger.warning("CC session cleanup failed: {}", e)
-
-
 def _schedule_builtin_jobs(scheduler: BackgroundScheduler) -> None:
     scheduler.add_job(
         _cleanup_idle_browsers,
@@ -225,12 +160,6 @@ def _schedule_builtin_jobs(scheduler: BackgroundScheduler) -> None:
         _cleanup_stale_files,
         IntervalTrigger(hours=24),
         id="_file_cleanup",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _cleanup_idle_cc_sessions,
-        IntervalTrigger(minutes=30),
-        id="_cc_session_cleanup",
         replace_existing=True,
     )
 
