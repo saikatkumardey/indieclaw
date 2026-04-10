@@ -100,7 +100,7 @@ def get_tool_activity(chat_id: str) -> tuple[str, float] | None:
 
 
 def get_tools_used(chat_id: str) -> set[str]:
-    return set(_tools_used_this_turn.get(chat_id, set()))
+    return _tools_used_this_turn.get(chat_id, set())
 
 
 def _strip_tool_prefix(name: str) -> str:
@@ -111,7 +111,7 @@ def _strip_tool_prefix(name: str) -> str:
 
 
 def get_tool_timings(chat_id: str) -> list[tuple[str, float]]:
-    return list(_tool_timings.get(chat_id, []))
+    return _tool_timings.get(chat_id, [])
 
 
 def clear_tool_activity(chat_id: str) -> None:
@@ -235,21 +235,9 @@ def session_log(chat_id: str, role: str, content: str | dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-_RTK_PATHS = [
-    "/home/claude-user/.local/bin/rtk",
-    "/usr/local/bin/rtk",
-]
-
-
 def _rtk_bin() -> str | None:
     import shutil
-    found = shutil.which("rtk")
-    if found:
-        return found
-    for p in _RTK_PATHS:
-        if os.path.isfile(p):
-            return p
-    return None
+    return shutil.which("rtk")
 
 
 def _rtk_rewrite(cmd: str) -> tuple[str, bool]:
@@ -459,7 +447,6 @@ def _record_result(chat_id: str, msg: ResultMessage) -> None:
 
 def _load_recent_context(chat_id: str, max_chars: int = 2000) -> str:
     """Load recent exchanges for this chat from session logs."""
-    import json
     from datetime import timedelta
 
     sessions_dir = workspace.HOME / "sessions"

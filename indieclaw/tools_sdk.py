@@ -97,8 +97,7 @@ async def self_update(args: dict) -> dict:
 
     if branch:
         source = f"{source}@{branch}"
-
-    if not branch:
+    else:
         old_version = _local_version()
         remote = await asyncio.to_thread(_check_remote_version, source)
         if remote and remote == old_version:
@@ -283,8 +282,8 @@ async def telegram_send_voice(args: dict) -> dict:
         return err
 
     text = str(args["text"])
-    voice = str(args.get("voice", "en-US-AriaNeural") or "en-US-AriaNeural")
-    caption = str(args.get("caption", "") or "")
+    voice = str(args.get("voice") or "en-US-AriaNeural")
+    caption = str(args.get("caption") or "")
 
     with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False, dir=str(workspace.HOME)) as tmp:
         ogg_path = tmp.name
@@ -542,18 +541,17 @@ _BOT_COMMANDS = [
 
 @tool("sync_commands", "Re-register all bot commands with Telegram so they show in the / menu.", {})
 async def sync_commands(args: dict) -> dict:
-    import json as _json
     import urllib.error
     import urllib.request
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not token:
         return _text("Error: TELEGRAM_BOT_TOKEN not set.")
     url = f"https://api.telegram.org/bot{token}/setMyCommands"
-    payload = _json.dumps({"commands": [{"command": c, "description": d} for c, d in _BOT_COMMANDS]}).encode()
+    payload = json.dumps({"commands": [{"command": c, "description": d} for c, d in _BOT_COMMANDS]}).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
-            result = _json.loads(resp.read())
+            result = json.loads(resp.read())
         if result.get("ok"):
             return _text(f"OK — registered {len(_BOT_COMMANDS)} commands with Telegram.")
         return _text(f"Telegram API error: {result}")

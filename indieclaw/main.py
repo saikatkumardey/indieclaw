@@ -204,10 +204,12 @@ def _preflight_checks() -> bool:
 
 async def _post_init(app, scheduler, commands) -> None:
     from loguru import logger
-    from telegram import BotCommand
+    from telegram import BotCommand, BotCommandScopeAllPrivateChats
     try:
-        await app.bot.set_my_commands([BotCommand(name, desc) for name, _, desc in commands if desc is not None])
-        logger.info("set_my_commands: registered {} commands", sum(1 for _, _, d in commands if d is not None))
+        bot_commands = [BotCommand(name, desc) for name, _, desc in commands if desc is not None]
+        await app.bot.set_my_commands(bot_commands)
+        await app.bot.set_my_commands(bot_commands, scope=BotCommandScopeAllPrivateChats())
+        logger.info("set_my_commands: registered {} commands", len(bot_commands))
     except Exception as e:
         logger.error("set_my_commands failed: {}", e)
     from .scheduler import set_main_loop
@@ -246,8 +248,6 @@ async def _post_shutdown(app, scheduler) -> None:
 @app.command()
 def chat() -> None:
     """Launch the interactive TUI chat. Do not run alongside 'indieclaw start'."""
-    from dotenv import load_dotenv
-
     from . import workspace
     workspace.init()
     load_dotenv(workspace.HOME / ".env", override=True)

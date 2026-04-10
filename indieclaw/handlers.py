@@ -72,7 +72,7 @@ def _detect_promise(text: str) -> str | None:
         if _PROMISE_RE.search(sentence):
             snippet = sentence.strip()
             return snippet[:120] if snippet else None
-    return text[:120]
+    return None  # unreachable: _PROMISE_RE matched text so at least one sentence matches
 
 
 def _cancel_followup_timer(chat_id: str) -> None:
@@ -277,9 +277,8 @@ async def _reply_chunked(message, text: str) -> None:
     formatted = _to_telegram_html(text)
     if not formatted:
         return
-    chunks = [formatted[i : i + MAX_TG_MSG] for i in range(0, len(formatted), MAX_TG_MSG)]
-    for chunk in chunks:
-        await _reply_html(message, chunk)
+    for i in range(0, len(formatted), MAX_TG_MSG):
+        await _reply_html(message, formatted[i : i + MAX_TG_MSG])
 
 
 async def _send_reply(bot, message, chat_id: str, reply: str) -> None:
@@ -655,7 +654,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 def _extract_reaction_emojis(added: list) -> list[str]:
     return [
-        r.emoji if hasattr(r, "emoji") else f"(custom:{r.custom_emoji_id})"
+        getattr(r, "emoji", None) or f"(custom:{r.custom_emoji_id})"
         for r in added
         if hasattr(r, "emoji") or hasattr(r, "custom_emoji_id")
     ]

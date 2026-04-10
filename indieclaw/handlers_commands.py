@@ -35,6 +35,14 @@ from .version import local_version
 from .version import local_version as _local_version
 
 
+async def _reply_html(message, text: str) -> None:
+    """Send HTML reply, falling back to plain text if parsing fails."""
+    try:
+        await message.reply_text(text, parse_mode="HTML")
+    except Exception:
+        await message.reply_text(text)
+
+
 def _fmt_tokens(n: int) -> str:
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
@@ -140,10 +148,7 @@ async def on_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         "/restart \u2014 restart the bot\n"
         "/update \u2014 update and restart"
     )
-    try:
-        await update.message.reply_text(text, parse_mode="HTML")
-    except Exception:
-        await update.message.reply_text(text)
+    await _reply_html(update.message, text)
 
 
 @require_allowed
@@ -170,10 +175,7 @@ async def on_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         f"{_today_section()}"
         f"{_history_section()}"
     )
-    try:
-        await update.message.reply_text(text, parse_mode="HTML")
-    except Exception:
-        await update.message.reply_text(text)
+    await _reply_html(update.message, text)
 
 
 
@@ -195,10 +197,7 @@ async def on_crons(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         prompt = _html.escape(job.get("prompt", "")[:60])
         lines.append(f"\u23f0 <b>{jid}</b> <code>{cron}</code>\n   {prompt}")
     text = f"<b>Scheduled jobs</b> ({len(jobs)})\n\n" + "\n\n".join(lines)
-    try:
-        await update.message.reply_text(text, parse_mode="HTML")
-    except Exception:
-        await update.message.reply_text(text)
+    await _reply_html(update.message, text)
 
 
 _MODEL_ALIASES: dict[str, str] = {
@@ -210,7 +209,8 @@ _MODEL_ALIASES: dict[str, str] = {
 
 @require_allowed
 async def on_model(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-    arg = (update.message.text or "").split(maxsplit=1)[1].strip().lower() if len((update.message.text or "").split()) > 1 else ""
+    raw = update.message.text or ""
+    arg = raw.split(maxsplit=1)[1].strip().lower() if len(raw.split()) > 1 else ""
 
     if arg:
         model_id = _MODEL_ALIASES.get(arg) or arg
@@ -247,12 +247,13 @@ async def _handle_selection_callback(
     """Generic handler for inline keyboard selection callbacks (model, effort, etc.)."""
     cb = update.callback_query
     await cb.answer()
-    if not (cb.data or "").startswith(f"{prefix}:"):
+    prefix_colon = f"{prefix}:"
+    if not (cb.data or "").startswith(prefix_colon):
         return
     if not is_allowed(update.effective_chat.id):
         await cb.edit_message_text("Not authorised.")
         return
-    selected = cb.data[len(f"{prefix}:"):]
+    selected = cb.data[len(prefix_colon):]
     if selected not in {cid for cid, _ in choices}:
         await cb.edit_message_text(f"Unknown {prefix}.")
         return
@@ -411,10 +412,7 @@ async def on_tasks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append(f"  {date_info}")
 
     text = "\n".join(lines)
-    try:
-        await update.message.reply_text(text, parse_mode="HTML")
-    except Exception:
-        await update.message.reply_text(text)
+    await _reply_html(update.message, text)
 
 
 @require_allowed

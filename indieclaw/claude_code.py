@@ -107,8 +107,7 @@ def get_session_info(chat_id: str) -> str | None:
     parts = [f"🅲🅻🅰🆄🅳🅴 🅲🅾🅳🅴\n\n<b>Session</b> ({busy}) · {elapsed}"]
     if session.model:
         model = session.model
-        for prefix in ("claude-", "anthropic/"):
-            model = model.removeprefix(prefix)
+        model = model.removeprefix("claude-").removeprefix("anthropic/")
         parts.append(f"Model: {model}")
     stats = []
     if session.total_cost > 0:
@@ -469,7 +468,7 @@ async def _stream_loop(session: CCSession, bot) -> None:
             session.buffer = f"⚠️ exited with code {exit_code}"
         elif not session.buffer.strip():
             session.buffer = "✅ done (no output)"
-        elif exit_code and exit_code != 0:
+        elif exit_code:
             session.buffer += f"\n\n⚠️ exit code {exit_code}"
 
         await _edit_output(session, bot, final=True)
@@ -569,7 +568,7 @@ async def start_session(chat_id: str, prompt: str, bot, working_dir: str | None 
         return
 
     truncated = _truncate(prompt, 80)
-    resuming = chat_id in _sessions and _sessions.get(chat_id, CCSession(chat_id="")).session_id
+    resuming = chat_id in _sessions and _sessions[chat_id].session_id
     label = "resuming…" if resuming else "starting…"
     msg = await bot.send_message(
         chat_id=chat_id,
