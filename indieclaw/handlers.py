@@ -485,7 +485,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     active = _active_runs.get(chat_id)
     if active and not active.done():
         from .config import Config
-        interrupt = Config.load().get("interrupt_on_message", True)
+        interrupt = Config.load().get("interrupt_on_message", False)
         if interrupt:
             active.cancel()
             _active_runs.pop(chat_id, None)
