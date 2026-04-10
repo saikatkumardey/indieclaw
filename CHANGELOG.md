@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.38] - 2026-04-10
+
+
+
+
 ## [0.1.37] - 2026-04-08
 
 - Show branch name in startup message when running from non-main branch
