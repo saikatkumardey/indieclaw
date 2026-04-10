@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.39] - 2026-04-10
+
+- Remove dead code, redundant copies, and duplicate logic across codebase
+
+
 ## [0.1.38] - 2026-04-10
 
 
