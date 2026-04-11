@@ -21,7 +21,7 @@ class Config:
         "subconscious_model": "claude-sonnet-4-6",
         "streaming": True,
         "debounce_seconds": 0.5,
-        "interrupt_on_message": True,
+        "interrupt_on_message": False,
         "max_budget_usd": 0.0,
         "agent_stall_timeout": 120,
         "agent_initial_timeout": 300,

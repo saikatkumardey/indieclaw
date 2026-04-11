@@ -23,9 +23,13 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import (
     AgentDefinition,
     HookMatcher,
+    PermissionResultAllow,
+    PermissionResultDeny,
     PostToolUseHookInput,
     PreToolUseHookInput,
+    StopHookInput,
     SyncHookJSONOutput,
+    ToolPermissionContext,
 )
 from loguru import logger
 
@@ -285,12 +289,75 @@ def _make_hooks(chat_id: str) -> dict:
             elapsed = round(_time.monotonic() - start, 2)
             bare_name = _strip_tool_prefix(input_data["tool_name"])
             _tool_timings.setdefault(chat_id, []).append((bare_name, elapsed))
+
+        # Scan tool response for Python tracebacks / errors and alert via Telegram
+        response = input_data.get("tool_response")
+        response_text = ""
+        if isinstance(response, str):
+            response_text = response
+        elif isinstance(response, dict):
+            response_text = str(response.get("output") or response.get("content") or response.get("text") or "")
+        elif isinstance(response, list):
+            response_text = " ".join(str(x) for x in response)
+        if response_text and (
+            "Traceback (most recent call last)" in response_text
+            or _re.search(r"(?m)^(Error|Exception|RuntimeError|TypeError|ValueError|AttributeError|ImportError|KeyError|IndexError):", response_text)
+        ):
+            tool_name = input_data.get("tool_name", "unknown")
+            snippet = response_text[:800]
+            alert = f"\u26a0\ufe0f Traceback in `{tool_name}` output:\n```\n{snippet}\n```"
+            try:
+                from .tools import _send_telegram
+                await asyncio.to_thread(_send_telegram, "6066100080", alert)
+            except Exception as tg_exc:
+                logger.warning("Traceback Telegram alert failed: {}", tg_exc)
+
+        return SyncHookJSONOutput()
+
+    async def _on_stop(input_data: StopHookInput, tool_use_id: str | None, context) -> SyncHookJSONOutput:
+        """Fires when the session ends naturally. Trigger a subconscious reflection."""
+        logger.info("Stop hook fired for {} — triggering memory flush", chat_id)
+        try:
+            from .scheduler import _run_subconscious
+            await asyncio.to_thread(_run_subconscious)
+        except Exception as e:
+            logger.warning("Stop hook: memory flush failed: {}", e)
         return SyncHookJSONOutput()
 
     return {
         "PreToolUse": [HookMatcher(hooks=[_on_tool_call])],
         "PostToolUse": [HookMatcher(hooks=[_on_tool_done])],
+        "Stop": [HookMatcher(hooks=[_on_stop])],
     }
+
+# ---------------------------------------------------------------------------
+# Tool permission gate (can_use_tool)
+# ---------------------------------------------------------------------------
+
+_DANGEROUS_PATTERNS = _re.compile(
+    r"rm\s+-rf"
+    r"|git\s+reset\s+--hard"
+    r"|git\s+push\s+--force"
+    r"|DROP\s+TABLE"
+    r"|(?i)\btruncate\b"
+    r"|>\s*/etc/"
+    r"|chmod\s+777",
+)
+
+
+async def _can_use_tool(tool_name: str, tool_input: dict, context: ToolPermissionContext) -> PermissionResultAllow | PermissionResultDeny:
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "")
+        if cmd and _DANGEROUS_PATTERNS.search(cmd):
+            return PermissionResultDeny(
+                message=(
+                    "Dangerous command pattern detected. "
+                    "Please confirm explicitly before running: "
+                    f"`{cmd[:200]}`"
+                ),
+            )
+    return PermissionResultAllow()
+
 
 # ---------------------------------------------------------------------------
 # Native subagents
@@ -367,6 +434,7 @@ def _make_options(chat_id: str, resume: str | None = None) -> ClaudeAgentOptions
         max_budget_usd=cfg.get("max_budget_usd") or None,
         hooks=_make_hooks(chat_id),
         agents=_make_agents(chat_id),
+        can_use_tool=_can_use_tool,
     )
 
 # ---------------------------------------------------------------------------
