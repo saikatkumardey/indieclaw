@@ -339,9 +339,10 @@ _DANGEROUS_PATTERNS = _re.compile(
     r"|git\s+reset\s+--hard"
     r"|git\s+push\s+--force"
     r"|DROP\s+TABLE"
-    r"|(?i)\btruncate\b"
+    r"|\btruncate\b"
     r"|>\s*/etc/"
     r"|chmod\s+777",
+    _re.IGNORECASE,
 )
 
 
