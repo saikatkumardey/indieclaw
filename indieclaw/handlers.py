@@ -358,6 +358,12 @@ async def _run_agent_and_reply(
         try:
             async with _TypingLoop(bot, chat_id):
                 reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
+            # Release lock immediately after agent_run() returns — don't hold it
+            # while background sub-agents are still running (they keep the Claude
+            # session alive, which would block new messages from being processed).
+            if _active_runs.get(chat_id) is asyncio.current_task():
+                _active_runs.pop(chat_id, None)
+                await _drain_followups(bot, chat_id)
             is_noise = not reply or reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:")
             sent_via_tool = any(t.endswith("telegram_send") for t in get_tools_used(chat_id))
             if is_noise:
@@ -384,6 +390,7 @@ async def _run_agent_and_reply(
                 except Exception:
                     logger.debug("failed to send error notification for chat_id={}", chat_id)
     finally:
+        # Fallback cleanup in case the early release above didn't run (e.g. exception path)
         if _active_runs.get(chat_id) is asyncio.current_task():
             _active_runs.pop(chat_id, None)
             await _drain_followups(bot, chat_id)
