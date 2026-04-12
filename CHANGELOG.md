@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.50] - 2026-04-12
+
+- feat: flock-based singleton guard to prevent multiple instances
+
+
 ## [0.1.49] - 2026-04-12
 
 
