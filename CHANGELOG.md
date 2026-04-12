@@ -2,6 +2,11 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.49] - 2026-04-12
+
+
+
+
 ## [0.1.48] - 2026-04-12
 
 - v0.1.47: sendChatAction tool, date_time entity, sendMessageDraft tool
