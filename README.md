@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/indieclaw?color=blue)](https://pypi.org/project/indieclaw/)
 [![Python](https://img.shields.io/pypi/pyversions/indieclaw)](https://pypi.org/project/indieclaw/)
 [![CI](https://github.com/saikatkumardey/indieclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/saikatkumardey/indieclaw/actions/workflows/ci.yml)
-[![python-doctor](https://img.shields.io/badge/python--doctor-91%2F100-brightgreen)](https://github.com/saikatkumardey/python-doctor)
+[![python-doctor](https://img.shields.io/badge/python--doctor-92%2F100-brightgreen)](https://github.com/saikatkumardey/python-doctor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Personal AI agent on Telegram. Self-hosted, powered by Claude.
