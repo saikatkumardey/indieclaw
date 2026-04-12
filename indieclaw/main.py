@@ -140,8 +140,9 @@ async def _post_shutdown(app, scheduler) -> None:
     except Exception as e:
         logger.warning("Browser cleanup failed during shutdown: {}", e)
     scheduler.shutdown(wait=False)
-    from .daemon import delete_pid
+    from .daemon import delete_pid, release_lock
     delete_pid()
+    release_lock()
     logger.info("IndieClaw stopped.")
 
 
@@ -265,7 +266,10 @@ def start(
         _start_daemon()
         return
 
-    from .daemon import is_running, write_pid
+    from .daemon import acquire_lock, is_running, write_pid
+    if not acquire_lock():
+        typer.echo("Another IndieClaw instance is already running. Exiting.")
+        raise typer.Exit(1)
     running, pid = is_running()
     if running and pid != os.getpid():
         typer.echo(f"Another IndieClaw instance is running (PID {pid}). Exiting.")

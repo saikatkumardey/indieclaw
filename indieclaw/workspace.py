@@ -22,6 +22,7 @@ SUBCONSCIOUS   = HOME / "subconscious.yaml"
 CONFIG        = HOME / "indieclaw.json"
 SESSION_STATE = HOME / "session_state.json"
 PID_FILE      = HOME / ".pid"
+LOCK_FILE     = HOME / ".lock"
 BRANCH_FILE   = HOME / ".branch"
 LOG_FILE      = HOME / "indieclaw.log"
 

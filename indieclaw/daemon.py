@@ -1,11 +1,43 @@
 from __future__ import annotations
 
+import fcntl
 import os
 import signal
 import subprocess
 import time
 
-from .workspace import PID_FILE
+from .workspace import LOCK_FILE, PID_FILE
+
+# Module-level lock file handle — kept open for the lifetime of the process.
+# The OS releases the flock automatically when the process dies.
+_lock_fh = None
+
+
+def acquire_lock() -> bool:
+    """Try to acquire the singleton flock. Returns True if acquired, False if another instance holds it."""
+    global _lock_fh
+    _lock_fh = open(LOCK_FILE, "w")  # noqa: WPS515 — intentionally kept open
+    try:
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fh.write(str(os.getpid()))
+        _lock_fh.flush()
+        return True
+    except OSError:
+        _lock_fh.close()
+        _lock_fh = None
+        return False
+
+
+def release_lock() -> None:
+    global _lock_fh
+    if _lock_fh is not None:
+        try:
+            fcntl.flock(_lock_fh, fcntl.LOCK_UN)
+            _lock_fh.close()
+        except OSError:
+            pass
+        _lock_fh = None
+        LOCK_FILE.unlink(missing_ok=True)
 
 
 def read_pid() -> int | None:
