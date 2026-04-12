@@ -43,12 +43,19 @@ def _check_allowed(chat_id: str) -> dict | None:
     "telegram_send",
     "Send a new Telegram message. Each response should be a single new message. "
     "Do not send multiple messages for one response — consolidate into one.",
-    {"chat_id": str, "message": str},
+    {"chat_id": str, "message": str, "reply_to_message_id": str},
 )
 async def telegram_send(args: dict) -> dict:
     if err := _check_allowed(args["chat_id"]):
         return err
-    text = await asyncio.to_thread(_send_telegram, args["chat_id"], args["message"])
+    reply_to = None
+    raw = args.get("reply_to_message_id")
+    if raw:
+        try:
+            reply_to = int(raw)
+        except (ValueError, TypeError):
+            pass
+    text = await asyncio.to_thread(_send_telegram, args["chat_id"], args["message"], reply_to)
     return _text(text)
 
 

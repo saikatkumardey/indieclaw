@@ -504,7 +504,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             buf["messages"].extend(prior)
         else:
             _pending_followups.setdefault(chat_id, []).append(text)
-            await msg.reply_text("Queued — will process after current run.")
             return
 
     buf = _debounce_buffers.get(chat_id)

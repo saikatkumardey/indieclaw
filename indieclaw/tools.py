@@ -27,12 +27,16 @@ def _tg_api_md(method: str, body: dict, *, timeout: int = 10) -> httpx.Response:
         return r
 
 
-def _send_telegram(chat_id: str, message: str) -> str:
+def _send_telegram(chat_id: str, message: str, reply_to_message_id: int | None = None) -> str:
     try:
         chunks = [message[i:i + MAX_TG_MSG] for i in range(0, len(message), MAX_TG_MSG)]
         last_message_id = None
-        for chunk in chunks:
-            r = _tg_api_md("sendMessage", {"chat_id": chat_id, "text": chunk})
+        for i, chunk in enumerate(chunks):
+            body: dict = {"chat_id": chat_id, "text": chunk}
+            # Only apply reply_to on first chunk
+            if i == 0 and reply_to_message_id is not None:
+                body["reply_to_message_id"] = reply_to_message_id
+            r = _tg_api_md("sendMessage", body)
             if not r.is_success:
                 if last_message_id is None:
                     return "Failed to send message."
