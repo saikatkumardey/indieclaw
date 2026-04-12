@@ -15,6 +15,7 @@ from .auth import default_chat_id, is_allowed
 from .tools import (
     _edit_telegram,
     _send_telegram,
+    _send_telegram_buttons,
     _send_telegram_file,
     _send_telegram_voice,
     _set_reaction,
@@ -327,6 +328,26 @@ async def telegram_react(args: dict) -> dict:
 
 
 @tool(
+    "telegram_send_buttons",
+    "Send a Telegram message with inline reply keyboard buttons. Use for confirmations, "
+    "quick-pick choices, or any decision that would otherwise require a text round-trip. "
+    "buttons is a JSON array of {label, data} objects — one button per row. "
+    "When the user taps a button, the agent receives: [User tapped button: <data>]. "
+    "Keep data short (under 60 chars). Example: "
+    '[{"label": "Yes", "data": "yes"}, {"label": "No", "data": "no"}]',
+    {"chat_id": str, "message": str, "buttons": str},
+)
+async def telegram_send_buttons(args: dict) -> dict:
+    chat_id = str(args["chat_id"])
+    if err := _check_allowed(chat_id):
+        return err
+    message = str(args.get("message") or "")
+    buttons_json = str(args.get("buttons") or "[]")
+    result = await asyncio.to_thread(_send_telegram_buttons, chat_id, message, buttons_json)
+    return _text(result)
+
+
+@tool(
     "test_tool",
     "Validate a staged tool file in tools/.staging/ before deploying. "
     "Checks SCHEMA structure and callable execute. Optionally runs execute with test_args (JSON string).",
@@ -569,7 +590,7 @@ CUSTOM_TOOLS = [
     telegram_send, telegram_edit, telegram_send_file, self_restart, self_update,
     update_config, read_skill_tool, search_sessions,
     browse, browser_click, browser_type, browser_screenshot, browser_eval,
-    telegram_send_voice, telegram_react,
+    telegram_send_voice, telegram_react, telegram_send_buttons,
     test_tool, deploy_tool, disable_tool,
     update_subconscious, reflect,
     web_fetch, sync_commands,

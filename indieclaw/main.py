@@ -232,6 +232,7 @@ def _register_handlers(bot) -> list:
         bot.add_handler(CommandHandler(name, handler))
     bot.add_handler(CallbackQueryHandler(h.on_model_callback, pattern="^model:"))
     bot.add_handler(CallbackQueryHandler(h.on_effort_callback, pattern="^effort:"))
+    bot.add_handler(CallbackQueryHandler(h.on_agent_callback, pattern="^agent:"))
     bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, h.on_message))
     bot.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.TEXT & ~filters.COMMAND, h.on_message))
     bot.add_handler(MessageHandler(filters.PHOTO, h.on_photo))

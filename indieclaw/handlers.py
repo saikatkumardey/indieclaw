@@ -36,6 +36,8 @@ from .handlers_commands import (  # noqa: F401
     on_streaming,
     on_update,
 )
+
+# on_agent_callback is defined below (needs _run_agent_and_reply from this module)
 from .tools import MAX_TG_MSG
 
 _RE_CODE_SPLIT = re.compile(r"(```[\s\S]*?```|`[^`]+`)")
@@ -537,6 +539,27 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _run_agent_and_reply(bot, last_msg, chat_id, agent_msg)
 
     buf["task"] = asyncio.create_task(_flush())
+
+
+@require_allowed
+async def on_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle inline keyboard button taps from telegram_send_buttons."""
+    cb = update.callback_query
+    await cb.answer()
+    data = (cb.data or "")
+    if data.startswith("agent:"):
+        data = data[len("agent:"):]
+    chat_id = str(update.effective_chat.id)
+    # Remove the keyboard so the button can't be tapped twice
+    try:
+        await cb.edit_message_reply_markup(reply_markup=None)
+    except Exception as e:
+        logger.debug("Could not remove inline keyboard: {}", e)
+    agent_msg = (
+        f"[chat_id={chat_id} message_id={cb.message.message_id}]\n"
+        f"[User tapped button: {data}]"
+    )
+    await _run_agent_and_reply(context.bot, None, chat_id, agent_msg)
 
 
 @require_allowed

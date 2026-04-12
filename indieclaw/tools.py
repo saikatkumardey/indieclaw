@@ -123,6 +123,42 @@ def _text_to_voice(text: str, output_path: str, voice: str = "en-US-AriaNeural")
             Path(mp3_path).unlink(missing_ok=True)
 
 
+def _send_telegram_buttons(chat_id: str, message: str, buttons_json: str) -> str:
+    """Send a message with inline keyboard buttons. buttons_json is a JSON array of {label, data} objects."""
+    import json
+    try:
+        buttons = json.loads(buttons_json)
+    except (ValueError, TypeError) as e:
+        return f"Error: invalid buttons JSON — {e}"
+    keyboard = []
+    for btn in buttons:
+        if isinstance(btn, dict):
+            label = str(btn.get("label", ""))
+            data = str(btn.get("data", ""))
+        else:
+            label = str(btn)
+            data = label.lower()
+        if not label:
+            continue
+        callback_data = f"agent:{data}"[:64]
+        keyboard.append([{"text": label, "callback_data": callback_data}])
+    if not keyboard:
+        return "Error: no valid buttons provided."
+    try:
+        body = {
+            "chat_id": chat_id,
+            "text": message[:MAX_TG_MSG],
+            "reply_markup": {"inline_keyboard": keyboard},
+        }
+        r = _tg_api_md("sendMessage", body)
+        if not r.is_success:
+            return f"Failed: {r.text}"
+        msg_id = r.json().get("result", {}).get("message_id")
+        return f"Sent. [message_id={msg_id}]" if msg_id else "Sent."
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def _set_reaction(chat_id: str, message_id: int, emoji: str) -> str:
     try:
         r = _tg_api("setMessageReaction", json={

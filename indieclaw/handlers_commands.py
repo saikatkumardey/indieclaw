@@ -24,7 +24,6 @@ from .agent import (
 )
 from .auth import is_allowed, require_allowed
 from .browser import BrowserManager
-from .config import Config
 from .session_state import SessionState
 from .tool_loader import load_custom_tools
 from .tools_sdk import CUSTOM_TOOLS
