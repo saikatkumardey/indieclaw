@@ -18,10 +18,10 @@ def _tg_api(method: str, *, timeout: int = 10, **kwargs) -> httpx.Response:
 
 
 def _tg_api_md(method: str, body: dict, *, timeout: int = 10) -> httpx.Response:
-    """Call a Telegram API method with Markdown, falling back to plain text."""
+    """Call a Telegram API method with HTML parse_mode, falling back to plain text."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     with httpx.Client(timeout=timeout) as client:
-        r = client.post(f"https://api.telegram.org/bot{token}/{method}", json={**body, "parse_mode": "Markdown"})
+        r = client.post(f"https://api.telegram.org/bot{token}/{method}", json={**body, "parse_mode": "HTML"})
         if not r.is_success:
             r = client.post(f"https://api.telegram.org/bot{token}/{method}", json=body)
         return r
