@@ -600,7 +600,7 @@ wheels = [
 
 [[package]]
 name = "indieclaw"
-version = "0.1.40"
+version = "0.1.48"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

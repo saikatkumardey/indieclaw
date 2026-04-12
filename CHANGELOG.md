@@ -2,6 +2,14 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.48] - 2026-04-12
+
+- v0.1.47: sendChatAction tool, date_time entity, sendMessageDraft tool
+- ci: update python-doctor badge to 92/100
+- feat: add telegram_send_buttons tool and inline keyboard support (v0.1.46)
+- feat: switch telegram send/edit from Markdown to HTML parse_mode (v0.1.45)
+
+
 ## [0.1.40] - 2026-04-10
 
 - Lean codebase: remove CC sessions, tasks, TUI; gut setup/doctor; dedup agent/handlers
