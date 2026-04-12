@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html as _html
 import re
+from datetime import timedelta, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -48,6 +49,8 @@ _RE_LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _RE_HEADING = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
 _RE_BULLET = re.compile(r"^(\s*)-\s+", re.MULTILINE)
 _RE_STRIP_HTML = re.compile(r"<[^>]+>")
+
+_JAKARTA_TZ = timezone(timedelta(hours=7))
 
 _DEBOUNCE_SECONDS = 1.5
 _debounce_buffers: dict[str, dict] = {}
@@ -535,7 +538,9 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         combined = "\n".join(pending["messages"])
         last_msg = pending["last_msg"]
         bot = pending["bot"]
-        agent_msg = f"[chat_id={chat_id} message_id={last_msg.message_id}]\n{combined}"
+        msg_dt = last_msg.date.replace(tzinfo=timezone.utc).astimezone(_JAKARTA_TZ)
+        date_str = msg_dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+        agent_msg = f"[chat_id={chat_id} message_id={last_msg.message_id} date_time={date_str}]\n{combined}"
         await _run_agent_and_reply(bot, last_msg, chat_id, agent_msg)
 
     buf["task"] = asyncio.create_task(_flush())

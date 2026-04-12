@@ -14,6 +14,7 @@ from . import workspace
 from .auth import default_chat_id, is_allowed
 from .tools import (
     _edit_telegram,
+    _send_chat_action,
     _send_telegram,
     _send_telegram_buttons,
     _send_telegram_file,
@@ -345,6 +346,49 @@ async def telegram_send_buttons(args: dict) -> dict:
     buttons_json = str(args.get("buttons") or "[]")
     result = await asyncio.to_thread(_send_telegram_buttons, chat_id, message, buttons_json)
     return _text(result)
+
+
+@tool(
+    "telegram_send_chat_action",
+    "Show a typing/activity indicator in Telegram chat. "
+    "Use before long operations to signal what's happening. "
+    "Actions: typing, upload_photo, record_video, upload_video, record_voice, "
+    "upload_voice, upload_document, choose_sticker, find_location, "
+    "record_video_note, upload_video_note.",
+    {"chat_id": str, "action": str},
+)
+async def telegram_send_chat_action(args: dict) -> dict:
+    chat_id = str(args["chat_id"])
+    if err := _check_allowed(chat_id):
+        return err
+    action = str(args.get("action") or "typing")
+    result = await asyncio.to_thread(_send_chat_action, chat_id, action)
+    return _text(result)
+
+
+@tool(
+    "telegram_send_draft",
+    "Send a draft/placeholder Telegram message and return its message_id. "
+    "Use to stake out a reply slot before doing work — then update it with telegram_edit. "
+    "Useful for long tasks where you want the user to see progress in place. "
+    "Returns: Sent. [draft_id=<message_id>]",
+    {"chat_id": str, "message": str, "reply_to_message_id": str},
+)
+async def telegram_send_draft(args: dict) -> dict:
+    chat_id = str(args["chat_id"])
+    if err := _check_allowed(chat_id):
+        return err
+    reply_to = None
+    raw = args.get("reply_to_message_id")
+    if raw:
+        try:
+            reply_to = int(raw)
+        except (ValueError, TypeError):
+            pass
+    message = str(args.get("message") or "✏️ working on it…")
+    result = await asyncio.to_thread(_send_telegram, chat_id, message, reply_to)
+    # Reformat message_id as draft_id for clarity
+    return _text(result.replace("[message_id=", "[draft_id="))
 
 
 @tool(

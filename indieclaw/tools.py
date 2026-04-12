@@ -159,6 +159,23 @@ def _send_telegram_buttons(chat_id: str, message: str, buttons_json: str) -> str
         return f"Error: {e}"
 
 
+_CHAT_ACTIONS = {
+    "typing", "upload_photo", "record_video", "upload_video",
+    "record_voice", "upload_voice", "upload_document", "choose_sticker",
+    "find_location", "record_video_note", "upload_video_note",
+}
+
+
+def _send_chat_action(chat_id: str, action: str) -> str:
+    if action not in _CHAT_ACTIONS:
+        return f"Error: unknown action {action!r}. Valid: {', '.join(sorted(_CHAT_ACTIONS))}"
+    try:
+        r = _tg_api("sendChatAction", json={"chat_id": chat_id, "action": action})
+        return "Done." if r.is_success else f"Failed: {r.text}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def _set_reaction(chat_id: str, message_id: int, emoji: str) -> str:
     try:
         r = _tg_api("setMessageReaction", json={
