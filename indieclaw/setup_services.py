@@ -10,6 +10,8 @@ _USER_SERVICE_TEMPLATE = """\
 [Unit]
 Description=IndieClaw Telegram AI Agent
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -30,7 +32,8 @@ _SYSTEM_SERVICE_TEMPLATE = """\
 Description=IndieClaw Telegram AI Agent
 After=network-online.target
 Wants=network-online.target
-StartLimitIntervalSec=0
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -98,12 +101,43 @@ def _install_user_service(workspace_home: Path, binary: str) -> None:
     except (PermissionError, OSError, subprocess.CalledProcessError) as exc:
         print(f"  Warning: Could not install user service ({exc}). Save unit to {svc}")
 
+def _remove_user_service() -> None:
+    """Disable and remove the user-level service if it exists."""
+    svc = Path.home() / ".config/systemd/user/indieclaw.service"
+    if not svc.exists():
+        return
+    try:
+        subprocess.run(["systemctl", "--user", "stop", "indieclaw"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "disable", "indieclaw"], capture_output=True)
+        svc.unlink(missing_ok=True)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        print("  OK: Removed conflicting user-level service.")
+    except (PermissionError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"  Warning: Could not remove user-level service ({exc}).")
+
+
+def _remove_system_service() -> None:
+    """Disable and remove the system-level service if it exists."""
+    if not _SYSTEM_SERVICE_PATH.exists():
+        return
+    try:
+        subprocess.run(["sudo", "systemctl", "stop", "indieclaw"], capture_output=True)
+        subprocess.run(["sudo", "systemctl", "disable", "indieclaw"], capture_output=True)
+        subprocess.run(["sudo", "rm", "-f", str(_SYSTEM_SERVICE_PATH)], capture_output=True)
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], capture_output=True)
+        print("  OK: Removed conflicting system-level service.")
+    except (PermissionError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"  Warning: Could not remove system-level service ({exc}).")
+
+
 def install_systemd_service(workspace_home: Path) -> None:
     if not _SYSTEMD_RUNTIME.exists():
         return
     binary = shutil.which("indieclaw") or sys.executable
     if _has_sudo() and _install_system_service(workspace_home, binary):
+        _remove_user_service()
         return
+    _remove_system_service()
     _install_user_service(workspace_home, binary)
 
 
