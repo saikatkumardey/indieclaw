@@ -2,6 +2,14 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.52] - 2026-05-01
+
+- refactor: collapse agent/handlers, drop lazy-ignorance retry and promise follow-up
+- fix: setup removes conflicting service, add restart limits to prevent infinite crash-loops
+- release: v0.1.51
+- ci: update python-doctor badge to 90/100
+
+
 ## [0.1.51] - 2026-04-13
 
 
