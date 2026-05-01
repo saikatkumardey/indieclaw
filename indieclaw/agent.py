@@ -45,7 +45,8 @@ from .tools_sdk import CUSTOM_TOOLS
 # ---------------------------------------------------------------------------
 
 AVAILABLE_MODELS: list[tuple[str, str]] = [
-    ("claude-opus-4-6",           "Opus 4.6 — Most capable"),
+    ("claude-opus-4-7",           "Opus 4.7 — Most capable"),
+    ("claude-opus-4-6",           "Opus 4.6"),
     ("claude-sonnet-4-6",         "Sonnet 4.6 — Balanced (default)"),
     ("claude-haiku-4-5-20251001", "Haiku 4.5 — Fastest"),
 ]

@@ -630,7 +630,7 @@ class TestOnModel:
 
         with patch("indieclaw.handlers_commands.set_model", new_callable=AsyncMock) as mock_set:
             await on_model(update, MagicMock())
-            mock_set.assert_awaited_once_with("claude-opus-4-6")
+            mock_set.assert_awaited_once_with("claude-opus-4-7")
             reply_text = update.message.reply_text.call_args[0][0]
             assert "Opus" in reply_text
 
