@@ -56,56 +56,6 @@ _DEBOUNCE_SECONDS = 1.5
 _debounce_buffers: dict[str, dict] = {}
 _active_runs: dict[str, asyncio.Task] = {}  # chat_id -> running agent task
 _pending_followups: dict[str, list[str]] = {}  # chat_id -> queued messages
-_followup_timers: dict[str, asyncio.Task] = {}  # chat_id -> scheduled follow-up task
-_FOLLOWUP_DELAY = 600  # seconds
-
-_PROMISE_RE = re.compile(
-    r"\b(I'?ll|I will|let me|will do|going to|I can do that|I'?ll get back|I'?ll set|I'?ll look|I'?ll check|I'?ll take care)\b",
-    re.IGNORECASE,
-)
-
-
-def _detect_promise(text: str) -> str | None:
-    """Return a short snippet if the text contains a promise, else None."""
-    m = _PROMISE_RE.search(text)
-    if not m:
-        return None
-    # Find the sentence containing the match
-    for sentence in re.split(r"[.!?\n]", text):
-        if _PROMISE_RE.search(sentence):
-            snippet = sentence.strip()
-            return snippet[:120] if snippet else None
-
-
-def _cancel_followup_timer(chat_id: str) -> None:
-    task = _followup_timers.pop(chat_id, None)
-    if task and not task.done():
-        task.cancel()
-
-
-def _maybe_schedule_followup(bot, chat_id: str, reply: str) -> None:
-    snippet = _detect_promise(reply)
-    if not snippet:
-        return
-    _cancel_followup_timer(chat_id)
-
-    async def _fire():
-        await asyncio.sleep(_FOLLOWUP_DELAY)
-        _followup_timers.pop(chat_id, None)
-        prompt = (
-            f"[System: {_FOLLOWUP_DELAY // 60} minutes ago you told the user: \"{snippet}\". "
-            "Check whether you've completed this. If done, send a brief confirmation. "
-            "If not, complete it now and report back.]"
-        )
-        await _run_agent_and_reply(bot, None, chat_id, prompt)
-
-    def _on_followup_done(t: asyncio.Task) -> None:
-        if not t.cancelled() and t.exception():
-            logger.warning("Follow-up task failed for {}: {}", chat_id, t.exception())
-
-    task = asyncio.create_task(_fire())
-    task.add_done_callback(_on_followup_done)
-    _followup_timers[chat_id] = task
 
 
 async def flush_debounce(chat_id: str) -> None:
@@ -153,12 +103,6 @@ _TOOL_NOISE_PHRASES = {
     "No reply needed.",
     "(No message — standing by.)",
 }
-
-def _should_suppress_reply(reply: str, chat_id: str) -> bool:
-    """Return True if the reply should not be sent to the user."""
-    if not reply or reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:"):
-        return True
-    return any(t.endswith("telegram_send") for t in get_tools_used(chat_id))
 
 
 def _format_activity(label: str, elapsed: float) -> str:
@@ -294,50 +238,6 @@ async def _preview_sender(bot, chat_id: str, accumulated: list[str], done_event:
             pass
 
 
-async def _run_agent_and_reply_streaming(
-    bot, message, chat_id: str, agent_msg: str,
-) -> None:
-    placeholder_id: list[int] = []
-    try:
-        ph = await bot.send_message(chat_id=chat_id, text="\U0001f527 working\u2026")
-        placeholder_id.append(ph.message_id)
-    except Exception:
-        logger.debug("placeholder send failed", exc_info=True)
-
-    accumulated: list[str] = []
-    done_event = asyncio.Event()
-    sender_task = asyncio.create_task(_preview_sender(bot, chat_id, accumulated, done_event, placeholder_id))
-    try:
-        async for event_type, data in agent_run_streaming(chat_id=chat_id, user_message=agent_msg):
-            if event_type == "text_delta":
-                accumulated.append(data)
-            elif event_type == "done":
-                done_event.set()
-                if _should_suppress_reply(data, chat_id):
-                    return
-                await _send_reply(bot, message, chat_id, data)
-                _maybe_schedule_followup(bot, chat_id, data)
-    except asyncio.CancelledError:
-        if message and chat_id not in _debounce_buffers:
-            await message.reply_text("Stopped.")
-    except Exception as e:
-        logger.exception("Streaming error: {}", e)
-        if message:
-            await message.reply_text(_classify_error(e))
-    finally:
-        done_event.set()
-        sender_task.cancel()
-        try:
-            await sender_task
-        except asyncio.CancelledError:
-            pass
-        if placeholder_id:
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=placeholder_id[0])
-            except Exception:
-                logger.debug("placeholder delete failed", exc_info=True)
-
-
 async def _drain_followups(bot, chat_id: str) -> None:
     """Process queued follow-up messages after the active run completes."""
     queued = _pending_followups.pop(chat_id, None)
@@ -349,56 +249,97 @@ async def _drain_followups(bot, chat_id: str) -> None:
     await _run_agent_and_reply(bot, None, chat_id, agent_msg)
 
 
-async def _run_agent_and_reply(
-    bot, message, chat_id: str, agent_msg: str,
-) -> None:
+async def _release_active_run(bot, chat_id: str) -> None:
+    if _active_runs.get(chat_id) is asyncio.current_task():
+        _active_runs.pop(chat_id, None)
+        await _drain_followups(bot, chat_id)
+
+
+async def _send_error(bot, message, chat_id: str, err_text: str) -> None:
+    if message:
+        await message.reply_text(err_text)
+        return
+    try:
+        await bot.send_message(chat_id=int(chat_id), text=err_text)
+    except Exception:
+        logger.debug("failed to send error notification for chat_id={}", chat_id)
+
+
+async def _finalize_reply(bot, message, chat_id: str, reply: str) -> None:
+    is_noise = not reply or reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:")
+    sent_via_tool = any(t.endswith("telegram_send") for t in get_tools_used(chat_id))
+    if sent_via_tool:
+        return
+    await _send_reply(bot, message, chat_id, "\u2705 Done." if is_noise else reply)
+
+
+async def _run_streaming(chat_id: str, agent_msg: str, accumulated: list[str], done_event: asyncio.Event) -> str:
+    reply = "(no response)"
+    async for ev_type, data in agent_run_streaming(chat_id=chat_id, user_message=agent_msg):
+        if ev_type == "text_delta":
+            accumulated.append(data)
+        elif ev_type == "done":
+            reply = data
+            done_event.set()
+    return reply
+
+
+async def _start_preview(bot, chat_id: str, accumulated: list[str], done_event: asyncio.Event):
+    placeholder_id: list[int] = []
+    try:
+        ph = await bot.send_message(chat_id=chat_id, text="\U0001f527 working\u2026")
+        placeholder_id.append(ph.message_id)
+    except Exception:
+        logger.debug("placeholder send failed", exc_info=True)
+    sender_task = asyncio.create_task(
+        _preview_sender(bot, chat_id, accumulated, done_event, placeholder_id)
+    )
+    return placeholder_id, sender_task
+
+
+async def _cleanup_preview(sender_task, placeholder_id: list[int], bot, chat_id: str) -> None:
+    if sender_task:
+        sender_task.cancel()
+        try:
+            await sender_task
+        except asyncio.CancelledError:
+            pass
+    if placeholder_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=placeholder_id[0])
+        except Exception:
+            logger.debug("placeholder delete failed", exc_info=True)
+
+
+async def _run_agent_and_reply(bot, message, chat_id: str, agent_msg: str) -> None:
+    streaming = bool(message) and not chat_id.startswith("cron:") and get_streaming()
+    accumulated: list[str] = []
+    done_event = asyncio.Event()
+    placeholder_id: list[int] = []
+    sender_task: asyncio.Task | None = None
+    if streaming:
+        placeholder_id, sender_task = await _start_preview(bot, chat_id, accumulated, done_event)
+
     _active_runs[chat_id] = asyncio.current_task()
     try:
-        if message and not chat_id.startswith("cron:") and get_streaming():
-            await _run_agent_and_reply_streaming(
-                bot, message, chat_id, agent_msg,
-            )
-            return
-
         try:
-            async with _TypingLoop(bot, chat_id):
-                reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
-            # Release lock immediately after agent_run() returns — don't hold it
-            # while background sub-agents are still running (they keep the Claude
-            # session alive, which would block new messages from being processed).
-            if _active_runs.get(chat_id) is asyncio.current_task():
-                _active_runs.pop(chat_id, None)
-                await _drain_followups(bot, chat_id)
-            is_noise = not reply or reply in _TOOL_NOISE_PHRASES or reply.startswith("Done. (used:")
-            sent_via_tool = any(t.endswith("telegram_send") for t in get_tools_used(chat_id))
-            if is_noise:
-                if not sent_via_tool:
-                    await _send_reply(bot, message, chat_id, "\u2705 Done.")
-                return
-            if sent_via_tool:
-                return
-            await _send_reply(bot, message, chat_id, reply)
-            _maybe_schedule_followup(bot, chat_id, reply)
+            if streaming:
+                reply = await _run_streaming(chat_id, agent_msg, accumulated, done_event)
+            else:
+                async with _TypingLoop(bot, chat_id):
+                    reply = await agent_run(chat_id=chat_id, user_message=agent_msg)
+            await _release_active_run(bot, chat_id)
+            await _finalize_reply(bot, message, chat_id, reply)
         except asyncio.CancelledError:
-            # If debounce buffer exists for this chat, we're being interrupted
-            # by a new message — stay silent, the restart will handle it.
             if message and chat_id not in _debounce_buffers:
                 await message.reply_text("Stopped.")
         except Exception as e:
             logger.exception("Error: {}", e)
-            err_text = _classify_error(e)
-            if message:
-                await message.reply_text(err_text)
-            else:
-                try:
-                    await bot.send_message(chat_id=int(chat_id), text=err_text)
-                except Exception:
-                    logger.debug("failed to send error notification for chat_id={}", chat_id)
+            await _send_error(bot, message, chat_id, _classify_error(e))
     finally:
-        # Fallback cleanup in case the early release above didn't run (e.g. exception path)
-        if _active_runs.get(chat_id) is asyncio.current_task():
-            _active_runs.pop(chat_id, None)
-            await _drain_followups(bot, chat_id)
+        done_event.set()
+        await _cleanup_preview(sender_task, placeholder_id, bot, chat_id)
+        await _release_active_run(bot, chat_id)
 
 
 async def on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -490,8 +431,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     text = msg.text or ""
     is_edit = update.edited_message is not None
     logger.info("{} [{}]: {}", "Edit" if is_edit else "Incoming", chat_id, text[:80])
-
-    _cancel_followup_timer(chat_id)
 
     # If agent is already running, either interrupt or queue based on config
     active = _active_runs.get(chat_id)
@@ -615,7 +554,6 @@ async def _transcribe_voice(path: str) -> str | None:
 
 
 async def _download_media(bot, file_id: str, dest: Path) -> Path | None:
-    """Download a Telegram file to *dest*. Returns dest on success, None on failure."""
     try:
         file = await bot.get_file(file_id)
         await file.download_to_drive(str(dest))
@@ -625,70 +563,65 @@ async def _download_media(bot, file_id: str, dest: Path) -> Path | None:
         return None
 
 
+async def _download_and_send(update: Update, bot, file_id: str, dest: Path, fail_msg: str, desc) -> None:
+    """Download a Telegram file, then pass `desc` to the agent. `desc` may be a string,
+    a sync callable taking dest, or an async callable taking dest."""
+    if not await _download_media(bot, file_id, dest):
+        await update.message.reply_text(fail_msg)
+        return
+    if callable(desc):
+        desc = desc(dest)
+        if asyncio.iscoroutine(desc):
+            desc = await desc
+    chat_id = str(update.effective_chat.id)
+    caption = update.message.caption or ""
+    agent_msg = f"[chat_id={chat_id} message_id={update.message.message_id}]\n{desc}\n\n{caption}"
+    await _run_agent_and_reply(bot, update.message, chat_id, agent_msg)
+
+
 @require_allowed
 async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle voice messages — download, tell the agent about it."""
-    chat_id = str(update.effective_chat.id)
     voice = update.message.voice
-    caption = update.message.caption or ""
     dest = workspace.UPLOADS_DIR / f"{voice.file_unique_id}.ogg"
-    if not await _download_media(context.bot, voice.file_id, dest):
-        await update.message.reply_text("Failed to download voice message.")
-        return
-    transcript = await _transcribe_voice(str(dest))
-    detail = f"{transcript}" if transcript else f"Saved to: {dest}"
-    agent_msg = (
-        f"[chat_id={chat_id} message_id={update.message.message_id}]\n"
-        f"[User sent a voice message ({voice.duration}s): {detail}]\n\n{caption}"
-    )
-    await _run_agent_and_reply(context.bot, update.message, chat_id, agent_msg)
+    async def desc(d):
+        transcript = await _transcribe_voice(str(d))
+        return f"[User sent a voice message ({voice.duration}s): {transcript or f'Saved to: {d}'}]"
+    await _download_and_send(update, context.bot, voice.file_id, dest, "Failed to download voice message.", desc)
 
 
 @require_allowed
 async def on_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle video messages — download and pass to agent."""
-    chat_id = str(update.effective_chat.id)
     video = update.message.video or update.message.animation
-    caption = update.message.caption or ""
     ext = "mp4" if update.message.video else "gif"
     dest = workspace.UPLOADS_DIR / f"{video.file_unique_id}.{ext}"
-    if not await _download_media(context.bot, video.file_id, dest):
-        await update.message.reply_text("Failed to download video.")
-        return
     duration = getattr(video, "duration", 0)
-    agent_msg = (
-        f"[chat_id={chat_id} message_id={update.message.message_id}]\n"
-        f"[User sent a video ({duration}s). Saved to: {dest}]\n\n{caption}"
+    await _download_and_send(
+        update, context.bot, video.file_id, dest, "Failed to download video.",
+        lambda d: f"[User sent a video ({duration}s). Saved to: {d}]",
     )
-    await _run_agent_and_reply(context.bot, update.message, chat_id, agent_msg)
 
 
 @require_allowed
 async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = str(update.effective_chat.id)
     doc = update.message.document
-    caption = update.message.caption or ""
     safe_name = Path(doc.file_name or f"{doc.file_unique_id}.bin").name
-    dest = workspace.UPLOADS_DIR / safe_name
-    if not await _download_media(context.bot, doc.file_id, dest):
-        await update.message.reply_text("Failed to download document.")
-        return
     mime = doc.mime_type or "application/octet-stream"
-    agent_msg = f"[chat_id={chat_id} message_id={update.message.message_id}]\n[User sent file '{safe_name}' ({mime}). Saved to: {dest}]\n\n{caption}"
-    await _run_agent_and_reply(context.bot, update.message, chat_id, agent_msg)
+    await _download_and_send(
+        update, context.bot, doc.file_id, workspace.UPLOADS_DIR / safe_name,
+        "Failed to download document.",
+        lambda d: f"[User sent file '{safe_name}' ({mime}). Saved to: {d}]",
+    )
 
 
 @require_allowed
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = str(update.effective_chat.id)
-    caption = update.message.caption or ""
     if not update.message.photo:
         await update.message.reply_text("No photo data received.")
         return
     photo = update.message.photo[-1]
-    dest = workspace.UPLOADS_DIR / f"{photo.file_unique_id}.jpg"
-    if not await _download_media(context.bot, photo.file_id, dest):
-        await update.message.reply_text("Failed to download photo.")
-        return
-    agent_msg = f"[chat_id={chat_id} message_id={update.message.message_id}]\n[User sent a photo. Saved to: {dest}]\n\n{caption}"
-    await _run_agent_and_reply(context.bot, update.message, chat_id, agent_msg)
+    await _download_and_send(
+        update, context.bot, photo.file_id,
+        workspace.UPLOADS_DIR / f"{photo.file_unique_id}.jpg",
+        "Failed to download photo.",
+        lambda d: f"[User sent a photo. Saved to: {d}]",
+    )

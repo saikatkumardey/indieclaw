@@ -126,23 +126,6 @@ def clear_tool_activity(chat_id: str) -> None:
     # It is cleared at the start of the next run() via _tools_used_this_turn.pop(chat_id, None).
 
 
-_IGNORANCE_PATTERNS = _re.compile(
-    r"I don'?t (know|have|recall|remember|see|have any context|have context)"
-    r"|I'?m not sure what you'?re referring"
-    r"|no context about"
-    r"|I don'?t have any (information|context|record)",
-    _re.IGNORECASE,
-)
-
-_MEMORY_TOOLS = {"Read", "mcp__indieclaw__search_sessions", "WebFetch"}
-
-
-def _is_lazy_ignorance(reply: str, tools_used: set[str]) -> bool:
-    """True if the reply claims ignorance but no memory/log tools were used."""
-    if not _IGNORANCE_PATTERNS.search(reply):
-        return False
-    return not tools_used.intersection(_MEMORY_TOOLS)
-
 # ---------------------------------------------------------------------------
 # Dynamic MCP server (module-level, reloaded per message)
 # ---------------------------------------------------------------------------
@@ -581,13 +564,28 @@ def _load_recent_context(chat_id: str, max_chars: int = 2000) -> str:
     return result
 
 
-async def _run_once(chat_id: str, user_message: str, options) -> str:
-    """Execute a single agent turn, returning the reply text."""
+def _dispatch_sdk_message(chat_id: str, msg, parts: list[str]) -> tuple[str, str] | None:
+    """Process one SDK message. Returns a ('text_delta', text) tuple to yield, or None."""
+    if isinstance(msg, StreamEvent):
+        text = _extract_stream_delta(msg)
+        return ("text_delta", text) if text else None
+    if isinstance(msg, AssistantMessage):
+        parts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
+    elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
+        logger.info("SDK compacted context for {}", chat_id)
+    elif isinstance(msg, ResultMessage):
+        _handle_result(chat_id, msg)
+    return None
+
+
+async def _stream_turn(chat_id: str, user_message: str, options):
+    """Run one SDK turn. Yields ('text_delta', str) deltas, then ('done', reply)."""
     cfg = Config.load()
     initial_timeout = cfg.get("agent_initial_timeout")
     stall = cfg.get("agent_stall_timeout")
 
     first_event = True
+    reply = "(no response)"
     try:
         loop = asyncio.get_event_loop()
         deadline = asyncio.timeout(initial_timeout)
@@ -600,91 +598,36 @@ async def _run_once(chat_id: str, user_message: str, options) -> str:
                     logger.debug("First SDK event for {} after startup", chat_id)
                     first_event = False
                 deadline.reschedule(loop.time() + stall)
-                if isinstance(msg, AssistantMessage):
-                    parts.extend(block.text for block in msg.content if isinstance(block, TextBlock))
-                elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
-                    logger.info("SDK compacted context for {}", chat_id)
-                elif isinstance(msg, ResultMessage):
-                    _handle_result(chat_id, msg)
-
-        return "\n".join(parts) or "(no response)"
+                ev = _dispatch_sdk_message(chat_id, msg, parts)
+                if ev:
+                    yield ev
+        reply = _strip_noise_suffix(_strip_hallucinated_turns("\n".join(parts) or "(no response)"))
     except TimeoutError:
         phase = "initial" if first_event else "inter-event"
         timeout_val = initial_timeout if first_event else stall
         logger.warning("Agent stalled ({} phase, {}s) for {}", phase, timeout_val, chat_id)
         _session_ids.pop(chat_id, None)
-        return f"Stalled — no events for {timeout_val}s ({phase}). Try again or /stop."
+        reply = f"Stalled — no events for {timeout_val}s ({phase}). Try again or /stop."
     except Exception as e:
         logger.exception("Agent error for {}: {}: {}", chat_id, type(e).__name__, e)
-        return f"Something went wrong ({type(e).__name__}). Please try again."
-
-
-async def run(chat_id: str, user_message: str) -> str:
-    reload_dynamic_tools()
-    lock = _session_locks[chat_id]
-    async with lock:
-        options, timestamped = _prepare_turn(chat_id, user_message)
-
-        reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, timestamped, options)))
-
-        # Lazy ignorance check: retry once with a nudge if agent claimed
-        # ignorance without checking session logs or memory
-        tools_used = _tools_used_this_turn.get(chat_id, set())
-        if _is_lazy_ignorance(reply, tools_used):
-            logger.info("Lazy ignorance detected for {}, retrying with nudge", chat_id)
-            _tools_used_this_turn.pop(chat_id, None)
-            nudge = "[System: You claimed ignorance without checking. Search session logs and read MEMORY.md before responding.]"
-            options = _make_options(chat_id, resume=_session_ids.get(chat_id))
-            reply = _strip_noise_suffix(_strip_hallucinated_turns(await _run_once(chat_id, nudge, options)))
-
-    session_log(chat_id, "assistant", reply)
-    clear_tool_activity(chat_id)
-    return reply
+        reply = f"Something went wrong ({type(e).__name__}). Please try again."
+    yield ("done", reply)
 
 
 async def run_streaming(chat_id: str, user_message: str):
     reload_dynamic_tools()
-    lock = _session_locks[chat_id]
-    async with lock:
+    async with _session_locks[chat_id]:
         options, timestamped = _prepare_turn(chat_id, user_message)
-        cfg = Config.load()
-        initial_timeout = cfg.get("agent_initial_timeout")
-        stall = cfg.get("agent_stall_timeout")
+        async for ev in _stream_turn(chat_id, timestamped, options):
+            if ev[0] == "done":
+                session_log(chat_id, "assistant", ev[1])
+                clear_tool_activity(chat_id)
+            yield ev
 
-        first_event = True
-        reply = "(no response)"
-        try:
-            loop = asyncio.get_event_loop()
-            deadline = asyncio.timeout(initial_timeout)
-            logger.debug("SDK run_streaming start for {} (initial={}s, stall={}s)", chat_id, initial_timeout, stall)
-            async with deadline, ClaudeSDKClient(options=options) as client:
-                await client.query(timestamped)
-                parts: list[str] = []
-                async for msg in client.receive_response():
-                    if first_event:
-                        logger.debug("First SDK event for {} after startup", chat_id)
-                        first_event = False
-                    deadline.reschedule(loop.time() + stall)
-                    if isinstance(msg, StreamEvent) and (text := _extract_stream_delta(msg)):
-                        yield ("text_delta", text)
-                    elif isinstance(msg, AssistantMessage):
-                        parts.extend(block.text for block in msg.content if isinstance(block, TextBlock))
-                    elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
-                        logger.info("SDK compacted context for {}", chat_id)
-                    elif isinstance(msg, ResultMessage):
-                        _handle_result(chat_id, msg)
 
-            reply = _strip_noise_suffix(_strip_hallucinated_turns("\n".join(parts) or "(no response)"))
-        except TimeoutError:
-            phase = "initial" if first_event else "inter-event"
-            timeout_val = initial_timeout if first_event else stall
-            logger.warning("Agent stalled ({} phase, {}s) for {}", phase, timeout_val, chat_id)
-            _session_ids.pop(chat_id, None)
-            reply = f"Stalled — no events for {timeout_val}s ({phase}). Try again or /stop."
-        except Exception as e:
-            logger.exception("Agent error for {}: {}: {}", chat_id, type(e).__name__, e)
-            reply = f"Something went wrong ({type(e).__name__}). Please try again."
-
-    session_log(chat_id, "assistant", reply)
-    clear_tool_activity(chat_id)
-    yield ("done", reply)
+async def run(chat_id: str, user_message: str) -> str:
+    reply = "(no response)"
+    async for kind, data in run_streaming(chat_id, user_message):
+        if kind == "done":
+            reply = data
+    return reply
