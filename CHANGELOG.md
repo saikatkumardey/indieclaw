@@ -2,6 +2,12 @@
 
 All notable changes to IndieClaw will be documented in this file.
 
+## [0.1.53] - 2026-05-01
+
+- feat: add Opus 4.7 as available model
+- ci: update python-doctor badge to 93/100
+
+
 ## [0.1.52] - 2026-05-01
 
 - refactor: collapse agent/handlers, drop lazy-ignorance retry and promise follow-up
