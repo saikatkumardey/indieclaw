@@ -121,6 +121,12 @@ def _cleanup_stale_files() -> None:
 
 _main_loop: asyncio.AbstractEventLoop | None = None
 
+# Hot-reload state for crons.yaml — see _reload_crons_if_changed.
+_crons_mtime: float | None = None
+_crons_state: dict[str, dict] = {}  # job_id -> signature dict
+_scheduler_ref: BackgroundScheduler | None = None
+_CRONS_RELOAD_SECONDS = 30
+
 
 def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Store the main event loop so scheduler threads can schedule coroutines on it."""
@@ -160,6 +166,12 @@ def _schedule_builtin_jobs(scheduler: BackgroundScheduler) -> None:
         _cleanup_stale_files,
         IntervalTrigger(hours=24),
         id="_file_cleanup",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _reload_crons_tick,
+        IntervalTrigger(seconds=_CRONS_RELOAD_SECONDS),
+        id="_crons_reload",
         replace_existing=True,
     )
 
@@ -214,16 +226,81 @@ def _schedule_cron_job(scheduler: BackgroundScheduler, job: dict) -> None:
         logger.error("Failed to schedule job %s: %s", job.get("id", "?"), e)
 
 
-def setup_scheduler() -> BackgroundScheduler:
-    scheduler = BackgroundScheduler()
-    _schedule_builtin_jobs(scheduler)
+def _job_signature(job: dict) -> dict:
+    """Fields that, if changed, require rescheduling."""
+    return {
+        "cron": job.get("cron"),
+        "prompt": job.get("prompt"),
+        "deliver_to": job.get("deliver_to"),
+        "timeout": int(job.get("timeout", _CRON_TIMEOUT_SECONDS)),
+    }
 
+
+def _reload_crons_if_changed(scheduler: BackgroundScheduler) -> None:
+    """Watch crons.yaml mtime; on change, diff jobs and reschedule.
+
+    Adds new jobs, removes deleted/disabled ones, replaces changed ones.
+    Builtin jobs (_browser_cleanup, _file_cleanup, _subconscious, _crons_reload)
+    are never touched — they live in their own ID namespace.
+    """
+    global _crons_mtime, _crons_state
     crons_path = workspace.CRONS
     if not crons_path.exists():
-        return scheduler
+        return
+    try:
+        mtime = crons_path.stat().st_mtime
+    except OSError:
+        return
+    if _crons_mtime is not None and mtime == _crons_mtime:
+        return
+    try:
+        data = yaml.safe_load(crons_path.read_text()) or {}
+    except Exception as e:
+        logger.error("crons.yaml reload failed (parse error): {}", e)
+        return
 
-    data = yaml.safe_load(crons_path.read_text()) or {}
+    # Build the new active set: jobs that are valid AND not disabled.
+    new_active: dict[str, dict] = {}  # id -> signature
+    job_by_id: dict[str, dict] = {}
     for job in data.get("jobs", []):
-        if not _should_skip_cron_job(job):
-            _schedule_cron_job(scheduler, job)
+        if _should_skip_cron_job(job):
+            continue
+        new_active[job["id"]] = _job_signature(job)
+        job_by_id[job["id"]] = job
+
+    old_ids = set(_crons_state.keys())
+    new_ids = set(new_active.keys())
+    is_initial_load = _crons_mtime is None
+
+    # Remove jobs that disappeared or got disabled.
+    for job_id in old_ids - new_ids:
+        try:
+            scheduler.remove_job(job_id)
+            logger.info("Unscheduled (removed/disabled): {}", job_id)
+        except Exception as e:
+            logger.warning("Failed to unschedule {}: {}", job_id, e)
+
+    # Add new or changed jobs (replace_existing=True covers in-place updates).
+    for job_id, sig in new_active.items():
+        if _crons_state.get(job_id) != sig:
+            _schedule_cron_job(scheduler, job_by_id[job_id])
+            if not is_initial_load and job_id in old_ids:
+                logger.info("Rescheduled (changed): {}", job_id)
+
+    _crons_state = new_active
+    _crons_mtime = mtime
+
+
+def _reload_crons_tick() -> None:
+    """APScheduler-friendly wrapper — reads the global scheduler ref."""
+    if _scheduler_ref is not None:
+        _reload_crons_if_changed(_scheduler_ref)
+
+
+def setup_scheduler() -> BackgroundScheduler:
+    global _scheduler_ref
+    scheduler = BackgroundScheduler()
+    _scheduler_ref = scheduler
+    _schedule_builtin_jobs(scheduler)
+    _reload_crons_if_changed(scheduler)
     return scheduler
